@@ -1,15 +1,17 @@
 import serial
 
-PORT = "COM6"
+PORT = "COM6"     # change if needed
 BAUD = 115200
-
-ser = serial.Serial(PORT, BAUD, timeout=1)
 
 START = 0xAA
 END   = 0x55
 
+ser = serial.Serial(PORT, BAUD, timeout=1)
+
 def read_packet():
-    # wait for start byte
+    """Read one [AA][data][55] packet safely."""
+    
+    # 1. Wait for START_BYTE
     while True:
         b = ser.read(1)
         if not b:
@@ -17,27 +19,32 @@ def read_packet():
         if b[0] == START:
             break
 
-    # read data byte
+    # 2. Read data byte (the 0/1)
     data = ser.read(1)
     if not data:
         return None
-    data_byte = data[0]
+    value = data[0]
 
-    # read end byte
-    end = ser.read(1)
-    if not end or end[0] != END:
+    # 3. Verify END_BYTE
+    e = ser.read(1)
+    if not e or e[0] != END:
         return None
 
-    # extract the 4 bits
-    s1 = (data_byte >> 0) & 1
-    s2 = (data_byte >> 1) & 1
-    s3 = (data_byte >> 2) & 1
-    s4 = (data_byte >> 3) & 1
+    return value
 
-    return [s1, s2, s3, s4]
 
+print("Listening on", PORT, "...")
 
 while True:
-    sensors = read_packet()
-    if sensors:
-        print("Sensors:", sensors)
+    result = read_packet()
+    if result is None:
+        print("Waiting...")
+        continue
+
+    # Print nicely
+    if result == 1:
+        print("Sensor: HIGH (1)")
+    elif result == 0:
+        print("Sensor: LOW  (0)")
+    else:
+        print("Invalid value:", result)
