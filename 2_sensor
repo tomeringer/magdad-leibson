@@ -1,0 +1,73 @@
+// החלף לערך הנגד הידוע שלך (למשל, 10000 עבור 10k אוהם)
+float R_KNOWN = 46000.0;
+
+// הפין האנלוגי
+int analogPin1 = A0;
+int analogPin2 = A2;
+
+// משתנה לספירת איטרציות
+int iterationCounter = 0;
+
+const byte START_BYTE = 0xAA;
+const byte END_BYTE   = 0x55;
+byte output1;
+byte output2;
+
+
+void setup() {
+  Serial.begin(115200); 
+}
+
+void loop() {
+  // 1. קרא את הערך הדיגיטלי מהארדואינו
+  int rawValue1 = analogRead(analogPin1);
+  int rawValue2 = analogRead(analogPin2);
+  // 2. בצע את החישוב הפיזיקלי
+  //    (שים לב להבדל בנוסחה מהפעם הקודמת)
+  float R_UNKNOWN1 = R_KNOWN * ( ((float)rawValue1- (float)rawValue2) / (1023.0 - (float)rawValue1) );
+  float R_UNKNOWN2 = R_KNOWN * ( (float)rawValue2 / (1023.0 - (float)rawValue1) );
+
+  if (R_UNKNOWN1 > 55000){
+    output1 = 1;
+  }
+  else{
+    output1 = 0;
+  }
+  if (R_UNKNOWN2 > 40000){
+    output2 = 1;
+  }
+  else{
+    output2 = 0;
+  }
+  //Serial.print(float(rawValue1)/1023);
+  //Serial.print(", ");
+  //Serial.println(float(rawValue2)/1023);
+  Serial.print("R1= ");
+  //Serial.print(R_UNKNOWN1);
+  Serial.print(output1);
+  Serial.print(", ");
+  Serial.print("R2= ");
+  //Serial.println(R_UNKNOWN2);
+  Serial.println(output2);
+
+
+  // Serial.print("R1= ");
+  // Serial.print(R_UNKNOWN1);
+  // //Serial.print(output1);
+  // Serial.print(", ");
+  // Serial.print("R2= ");
+  // Serial.println(R_UNKNOWN2);
+  // //Serial.println(output2);
+
+
+  //Serial.write(START_BYTE);
+  //Serial.write(output1);
+  //Serial.write(output2);
+  //Serial.write(END_BYTE);
+
+
+
+
+  iterationCounter++;
+  delay(500); 
+}
