@@ -1,0 +1,58 @@
+// הגדרת הנגד הקבוע (למשל 10k או 47k - בדוק מה שמת במעגל)
+float R_DIVIDER = 47000.0; 
+float V_IN = 5.0; // מתח הארדואינו
+
+// פינים
+int pins[] = {A0, A1, A3, A5};
+// מערך לשמירת התנגדויות
+float resistances[4];
+// מערך לפלטים (דיגיטליים)
+byte outputs[4];
+
+// ספים לזיהוי כיפוף (כוונן את הערכים האלה לפי הניסוי שלך)
+float thresholds[] = {40000.0, 40000.0, 40000.0, 40000.0}; 
+
+void setup() {
+  Serial.begin(115200); 
+}
+
+void loop() {
+  
+  for (int i = 0; i < 4; i++) {
+    int adcVal = analogRead(pins[i]);
+    
+    // הגנה מפני חלוקה באפס
+    if (adcVal == 0) adcVal = 1; 
+
+    // המרת ערך אנלוגי למתח (0-5V)
+    float voltage = adcVal * (V_IN / 1023.0);
+    
+    // חישוב ההתנגדות של החיישן (לפי נוסחת מחלק מתח רגילה)
+    // R_flex = R_fixed * (V_out / (V_in - V_out))
+    // ההנחה: החיישן מחובר בין הפין ל-GND, והנגד הקבוע בין הפין ל-5V
+    resistances[i] = R_DIVIDER * (voltage / (V_IN - voltage));
+
+    // קביעת הסטטוס (0 או 1)
+    if (resistances[i] > thresholds[i]) {
+      outputs[i] = 1;
+    } else {
+      outputs[i] = 0;
+    }
+  }
+
+  // הדפסה לבדיקה
+  Serial.print("R1: "); Serial.print((int)resistances[0]);
+  Serial.print(" | R2: "); Serial.print((int)resistances[1]);
+  Serial.print(" | R3: "); Serial.print((int)resistances[2]);
+  Serial.print(" | R4: "); Serial.println((int)resistances[3]);
+
+  // שליחה מהירה (למשל לפייתון)
+  // Serial.write(0xAA);
+  // Serial.write(outputs[0]);
+  // Serial.write(outputs[1]);
+  // Serial.write(outputs[2]);
+  // Serial.write(outputs[3]);
+  // Serial.write(0x55);
+
+  delay(1000); 
+}
