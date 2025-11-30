@@ -7,17 +7,20 @@ int pins[] = {A0, A1, A3, A5};
 // מערך לשמירת התנגדויות
 float resistances[4];
 // מערך לפלטים (דיגיטליים)
-byte outputs[4];
+byte packed_output;
 
 // ספים לזיהוי כיפוף (כוונן את הערכים האלה לפי הניסוי שלך)
-float thresholds[] = {40000.0, 40000.0, 40000.0, 40000.0}; 
+float thresholds[] = {40000.0, 40000.0, 60000.0, 180000.0}; 
+
+byte START = 0xAA;
+byte END = 0x55;
 
 void setup() {
   Serial.begin(115200); 
 }
 
 void loop() {
-  
+  packed_output=0;
   for (int i = 0; i < 4; i++) {
     int adcVal = analogRead(pins[i]);
     
@@ -34,25 +37,20 @@ void loop() {
 
     // קביעת הסטטוס (0 או 1)
     if (resistances[i] > thresholds[i]) {
-      outputs[i] = 1;
-    } else {
-      outputs[i] = 0;
+      packed_output |= (1 << i);
     }
   }
 
   // הדפסה לבדיקה
-  Serial.print("R1: "); Serial.print((int)resistances[0]);
-  Serial.print(" | R2: "); Serial.print((int)resistances[1]);
-  Serial.print(" | R3: "); Serial.print((int)resistances[2]);
-  Serial.print(" | R4: "); Serial.println((int)resistances[3]);
+  // Serial.print("R1: "); Serial.print((int)resistances[0]);
+  // Serial.print(" | R2: "); Serial.print((int)resistances[1]);
+  // Serial.print(" | R3: "); Serial.print((int)resistances[2]);
+  // Serial.print(" | R4: "); Serial.println((int)resistances[3]);
 
   // שליחה מהירה (למשל לפייתון)
-  // Serial.write(0xAA);
-  // Serial.write(outputs[0]);
-  // Serial.write(outputs[1]);
-  // Serial.write(outputs[2]);
-  // Serial.write(outputs[3]);
-  // Serial.write(0x55);
+  Serial.write(START);
+  Serial.write(packed_output);
+  Serial.write(END);
 
-  delay(1000); 
+  delay(500); 
 }
