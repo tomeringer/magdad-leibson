@@ -18,6 +18,8 @@ unsigned long lastTime = 0;
 
 // Complementary filter constant
 const float ALPHA = 0.98;   // gyro weight (0.95–0.99 typical)
+const float ALPHA_YAW = 0.98;   // gyro weight, tune 0.95–0.995
+
 
 void setup() {
   Serial.begin(115200);
@@ -43,40 +45,72 @@ void loop() {
 
     imu.getAGMT();
 
-    // ---------------- ACCEL ----------------
+    // ----- ACCEL -----
     float ax = imu.accX() * ACC_MG_TO_G;
     float ay = imu.accY() * ACC_MG_TO_G;
     float az = imu.accZ() * ACC_MG_TO_G;
 
-    // ---------------- GYRO ----------------
+    // ----- GYRO -----
     float gx = imu.gyrX();   // deg/s
     float gy = imu.gyrY();
     float gz = imu.gyrZ();
 
-    // ---------------- Time delta ----------------
+    // ----- MAGNETOMETER -----
+    float mx = imu.magX();
+    float my = imu.magY();
+    float mz = imu.magZ();
+
+    // ----- dt -----
     unsigned long now = micros();
-    float dt = (now - lastTime) * 1e-6f;  // convert to seconds
+    float dt = (now - lastTime) * 1e-6f;
     lastTime = now;
 
-    // ---------------- ACCEL ANGLES ----------------
+    // ----- ACCEL ANGLES -----
     float accelRoll  = atan2(ay, az) * 180.0 / PI;
     float accelPitch = atan2(-ax, sqrt(ay * ay + az * az)) * 180.0 / PI;
 
-    // ---------------- GYRO INTEGRATION ----------------
+    // ----- GYRO INTEGRATION -----
     roll  += gx * dt;
     pitch += gy * dt;
-    yaw   += gz * dt;   // yaw needs gyro or magnetometer
+    yaw   += gz * dt;   
 
-    // ---------------- COMPLEMENTARY FILTER ----------------
+    // ==========================================================
+    //                TILT-COMPENSATED MAG YAW
+    // ==========================================================
+
+    // Convert filtered roll/pitch to radians
+    float roll_rad  = roll  * PI / 180.0f;
+    float pitch_rad = pitch * PI / 180.0f;
+
+    // Tilt compensation
+    float mx_h = mx * cos(pitch_rad) + mz * sin(pitch_rad);
+    float my_h = mx * sin(roll_rad) * sin(pitch_rad)
+               + my * cos(roll_rad)
+               - mz * sin(roll_rad) * cos(pitch_rad);
+
+    float yaw_mag = atan2(-my_h, mx_h) * 180.0f / PI;
+
+    // ==========================================================
+    //                COMPLEMENTARY FILTER (for yaw)
+    // ==========================================================
+    const float ALPHA_YAW = 0.98;   // gyro weight, tune 0.95–0.995
+
+    yaw = ALPHA_YAW * yaw + (1.0f - ALPHA_YAW) * yaw_mag;
+
+    // Optional: wrap yaw
+    if (yaw > 180) yaw -= 360;
+    if (yaw < -180) yaw += 360;
+
+
+    // ----- COMPLEMENTARY FILTER FOR ROLL/PITCH -----
     roll  = ALPHA * roll  + (1.0 - ALPHA) * accelRoll;
     pitch = ALPHA * pitch + (1.0 - ALPHA) * accelPitch;
 
-    // ---------------- PRINT ----------------
+    // ----- PRINT -----
     Serial.println("====== IMU ORIENTATION ======");
     Serial.print("Roll (deg):  "); Serial.println(roll, 3);
     Serial.print("Pitch (deg): "); Serial.println(pitch, 3);
     Serial.print("Yaw (deg):   "); Serial.println(yaw, 3);
-
     Serial.println();
   }
 
