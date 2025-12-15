@@ -1,0 +1,71 @@
+// ========================================================
+//                 FLEX SENSOR SETUP
+// ========================================================
+const int NUM_FLEX = 4;
+int flexPins[NUM_FLEX] = {A0, A1, A3, A4};
+
+// נגד קבוע במחלק המתח (Ω)
+float R_FIXED[NUM_FLEX] = {47000, 47000, 47000, 47000};
+
+// מתח ייחוס אמיתי (למדוד עם מולטימטר!)
+const float V_IN = 4.78;
+
+// התנגדויות מחושבות
+float flexR[NUM_FLEX];
+
+// ספים (לדוגמה)
+float R_THRESH[NUM_FLEX] = {30000, 30000, 11000, 65000};
+
+// ========================================================
+//                     SETUP
+// ========================================================
+void setup() {
+  Serial.begin(115200);
+  Serial.println("Flex Sensor System ready");
+}
+
+// ========================================================
+//                     LOOP
+// ========================================================
+void loop() {
+
+  // ---------------- FLEX SENSORS ----------------
+  for (int i = 0; i < NUM_FLEX; i++) {
+
+    // מיצוע ADC לקריאה יציבה יותר
+    long sum = 0;
+    for (int k = 0; k < 10; k++) {
+      sum += analogRead(flexPins[i]);
+    }
+    float adc = sum / 10;
+    
+    // מניעת חלוקה באפס או ערכים שליליים
+    if (adc < 1) adc = 1;
+
+    float voltage = adc * (V_IN / 1023.0);
+
+    // נוסחה למעגל שבו הנגד הקבוע מחובר ל-5V
+    flexR[i] = R_FIXED[i] * (voltage / (V_IN - voltage));
+  }
+
+  // ---------------- FLEX LOGIC ----------------
+  // יצירת משתנה ביטים שמייצג איזה חיישנים עברו את הסף
+  byte flexBits = 0;
+  for (int i = 0; i < NUM_FLEX; i++) {
+    if (flexR[i] > R_THRESH[i]) {
+      flexBits |= (1 << i);
+    }
+  }
+
+  // ---------------- PRINT ----------------
+  Serial.print("Flex R [ohm]: ");
+  for (int i = 0; i < NUM_FLEX; i++) {
+    Serial.print(flexR[i], 1);
+    Serial.print("  ");
+  }
+
+  Serial.print("| Bits: ");
+  Serial.println(flexBits, BIN); // שים לב ל-println בסוף השורה
+
+  delay(1000);
+}
