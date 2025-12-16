@@ -1,199 +1,269 @@
 #include <Wire.h>
 #include <ICM_20948.h>
 
-// --------------------------------------------------------
-//                         IMU SETUP
-// --------------------------------------------------------
+// ========================================================
+//                       IMU SETUP
+// ========================================================
 ICM_20948_I2C imu;
-#define AD0_VAL 0  
+#define AD0_VAL 0
 
-// Bluetooth framing bytes
-byte START = 0xAA;
-byte END   = 0x55;
+constexpr float ACC_MG_TO_G = 0.001f;
+constexpr float ALPHA_RP  = 0.98f;
+constexpr float ALPHA_YAW = 0.98f;
+constexpr float MAX_DT = 0.1f;
 
-// Store last sent packet to avoid unnecessary transmissions
-byte last_packet1 = 0xFF;
-byte last_packet2 = 0xFF;
+// Orientation thresholds (deg)
+constexpr float ROLL_TH  = 45.0f;
+constexpr float PITCH_TH = 30.0f;
 
-const float ACC_MG_TO_G = 0.001f;
-const float G_TO_MS2 = 9.80665f;
+// ---- renamed to avoid SparkFun macro collision ----
+constexpr float GYRO_BIAS_DPS_X = -0.8248f;
+constexpr float GYRO_BIAS_DPS_Y =  0.1288f;
+constexpr float GYRO_BIAS_DPS_Z = -0.5285f;
 
-float roll = 0.0f;
-float pitch = 0.0f;
-float yaw = 0.0f;
+// Magnetometer calibration
+constexpr float MAG_OFF_X = 0.0f;
+constexpr float MAG_OFF_Y = -46.7f;
+constexpr float MAG_OFF_Z = -25.2f;
+
+constexpr float MAG_SCALE_X = 0.984f;
+constexpr float MAG_SCALE_Y = 1.05f;
+constexpr float MAG_SCALE_Z = 1.0f;
+
+// ========================================================
+//                     FLEX SENSOR SETUP
+// ========================================================
+constexpr int NUM_FLEX = 4;
+int flexPins[NUM_FLEX] = {A0, A1, A2, A3};
+
+float R_FIXED[NUM_FLEX]  = {47000, 47000, 47000, 47000};
+float R_THRESH[NUM_FLEX] = {180000, 30000, 11000, 130000};
+constexpr float V_IN = 4.78;
+
+float flexR[NUM_FLEX];
+
+// ========================================================
+//                   SERIAL1 FRAMING
+// ========================================================
+constexpr byte START_BYTE = 0xAA;
+constexpr byte END_BYTE   = 0x55;
+
+// ========================================================
+//                       DATA TYPES
+// ========================================================
+struct Vec3 {
+  float x, y, z;
+};
+
+struct Orientation {
+  float roll, pitch, yaw;
+};
+
+// ========================================================
+//                         STATE
+// ========================================================
+Orientation ori{0,0,0};
+Orientation ref{0,0,0};
 
 unsigned long lastTime = 0;
+unsigned long lastPrintTime = 0;
+constexpr unsigned long PRINT_PERIOD_MS = 200; // 5 Hz
 
-const float ALPHA = 0.98;
-const float ALPHA_YAW = 0.98;
+// ========================================================
+//                         UTILS
+// ========================================================
+float wrapAngle(float a) {
+  while (a > 180.0f)  a -= 360.0f;
+  while (a < -180.0f) a += 360.0f;
+  return a;
+}
 
-// --------------------------------------------------------
-//                   RESISTOR SENSOR SETUP
-// --------------------------------------------------------
-float R_DIVIDER[] ={5000,5000,5000,64000};
-float V_IN = 5.0;
-int pins[] = {A0, A1, A2, A3};
-float resistances[4];
+// 2-bit encoder
+uint8_t encodeAxis(float angle, float th) {
+  if (angle >  th) return 0b01;
+  if (angle < -th) return 0b10;
+  return 0b00;
+}
 
-// --------------------------------------------------------
-//                   THRESHOLDS
-// --------------------------------------------------------
-float R_THRESH[4] = {30000, 30000, 11000, 650000};
+// ========================================================
+//                       IMU MODULE
+// ========================================================
+void readIMU(Vec3 &acc, Vec3 &gyr, Vec3 &mag) {
+  imu.getAGMT();
 
-// IMU thresholds (angle in degrees)
-float ROLL_LOW  = -10, ROLL_HIGH  = 10;
-float PITCH_LOW = -10, PITCH_HIGH = 10;
-float YAW_LOW   = -20, YAW_HIGH   = 20;
+  acc = {
+    imu.accX() * ACC_MG_TO_G,
+    imu.accY() * ACC_MG_TO_G,
+    imu.accZ() * ACC_MG_TO_G
+  };
 
-// --------------------------------------------------------
+  gyr = {
+    imu.gyrX() - GYRO_BIAS_DPS_X,
+    imu.gyrY() - GYRO_BIAS_DPS_Y,
+    imu.gyrZ() - GYRO_BIAS_DPS_Z
+  };
+
+  mag = {
+    (imu.magX() - MAG_OFF_X) * MAG_SCALE_X,
+    (imu.magY() - MAG_OFF_Y) * MAG_SCALE_Y,
+    (imu.magZ() - MAG_OFF_Z) * MAG_SCALE_Z
+  };
+}
+
+Orientation accelOrientation(const Vec3 &a) {
+  return {
+    atan2(a.y, a.z) * RAD_TO_DEG,
+    atan2(-a.x, sqrt(a.y*a.y + a.z*a.z)) * RAD_TO_DEG,
+    0.0f
+  };
+}
+
+float magYaw(const Vec3 &m, float roll, float pitch) {
+  float r = roll  * DEG_TO_RAD;
+  float p = pitch * DEG_TO_RAD;
+  float mx = m.x * cos(p) + m.z * sin(p);
+  float my = m.x * sin(r)*sin(p) + m.y*cos(r) - m.z*sin(r)*cos(p);
+  return wrapAngle(atan2(-my, mx) * RAD_TO_DEG);
+}
+
+void updateOrientation(float dt) {
+  Vec3 acc, gyr, mag;
+  readIMU(acc, gyr, mag);
+
+  Orientation accOri = accelOrientation(acc);
+
+  ori.roll  += gyr.x * dt;
+  ori.pitch += gyr.y * dt;
+  ori.yaw   += gyr.z * dt;
+
+  float yawMag = magYaw(mag, ori.roll, ori.pitch);
+
+  ori.roll  = wrapAngle(ALPHA_RP  * ori.roll  + (1 - ALPHA_RP)  * accOri.roll);
+  ori.pitch = wrapAngle(ALPHA_RP  * ori.pitch + (1 - ALPHA_RP)  * accOri.pitch);
+  ori.yaw   = wrapAngle(ALPHA_YAW * ori.yaw   + (1 - ALPHA_YAW) * yawMag);
+}
+
+Orientation relativeOrientation() {
+  return {
+    wrapAngle(ori.roll  - ref.roll),
+    wrapAngle(ori.pitch - ref.pitch),
+    0.0f
+  };
+}
+
+// ========================================================
+//                       FLEX MODULE
+// ========================================================
+uint8_t readFlexBits() {
+  uint8_t bits = 0;
+
+  for (int i = 0; i < NUM_FLEX; i++) {
+    long sum = 0;
+    for (int k = 0; k < 10; k++) {
+      sum += analogRead(flexPins[i]);
+    }
+
+    float adc = max(1.0f, sum / 10.0f);
+    float v = adc * (V_IN / 1023.0f);
+    flexR[i] = R_FIXED[i] * (v / (V_IN - v));
+
+    if (flexR[i] > R_THRESH[i]) {
+      bits |= (1 << i);
+    }
+  }
+  return bits;
+}
+
+// ========================================================
+//                     PACKET + OUTPUT
+// ========================================================
+uint8_t buildPacketAndPrint() {
+  Orientation rel = relativeOrientation();
+
+  uint8_t rollBits  = encodeAxis(rel.roll,  ROLL_TH);
+  uint8_t pitchBits = encodeAxis(rel.pitch, PITCH_TH);
+  uint8_t flexBits  = readFlexBits();
+
+  uint8_t packet =
+      (flexBits << 4) |
+      (rollBits << 2) |
+      (pitchBits);
+
+  // ---- measurements ----
+  Serial.println("---- MEASUREMENTS ----");
+  Serial.print("Roll (deg):  ");  Serial.println(rel.roll,  3);
+  Serial.print("Pitch (deg): "); Serial.println(rel.pitch, 3);
+
+  Serial.print("Flex R [ohm]: ");
+  for (int i = 0; i < NUM_FLEX; i++) {
+    Serial.print(flexR[i], 1);
+    Serial.print("  ");
+  }
+  Serial.println();
+
+  // ---- debug packet (9-bit view) ----
+  uint16_t packet9 = (1 << 8) | packet;
+  Serial.print("PACKET BYTE: 0b");
+  Serial.println(packet9, BIN);
+  Serial.println();
+
+  return packet;
+}
+
+void sendPacketSerial1(uint8_t packet) {
+  Serial1.write(START_BYTE);
+  Serial1.write(packet);
+  Serial1.write(END_BYTE);
+}
+
+// ========================================================
 //                         SETUP
-// --------------------------------------------------------
+// ========================================================
 void setup() {
   Serial.begin(115200);
-  Serial1.begin(9600);
   while (!Serial) {}
+
+  Serial1.begin(9600);
 
   Wire.begin();
   Wire.setClock(400000);
-  imu.begin(Wire, AD0_VAL);
 
+  imu.begin(Wire, AD0_VAL);
   if (imu.status != ICM_20948_Stat_Ok) {
-    Serial.println("IMU init failed.");
+    Serial.println("IMU init failed");
     while (1);
   }
 
-  Serial.println("IMU initialized!");
+  Vec3 acc, gyr, mag;
+  readIMU(acc, gyr, mag);
+  ori = accelOrientation(acc);
+  ori.yaw = magYaw(mag, ori.roll, ori.pitch);
+  ref = ori;
+
   lastTime = micros();
+  Serial.println("System ready");
 }
 
-
-// --------------------------------------------------------
-//                         LOOP
-// --------------------------------------------------------
+// ========================================================
+//                           LOOP
+// ========================================================
 void loop() {
-
-  // ----------- Read resistors -----------
-  for (int i = 0; i < 4; i++) {
-    int adcVal = analogRead(pins[i]);
-    if (adcVal == 0) adcVal = 1;
-
-    float voltage = adcVal * (V_IN / 1023.0);
-    resistances[i] = R_DIVIDER[i] * (voltage / (V_IN - voltage));
-  }
-
-  // ----------- Read IMU always -----------
-  imu.getAGMT();
-
-  float ax = imu.accX() * ACC_MG_TO_G;
-  float ay = imu.accY() * ACC_MG_TO_G;
-  float az = imu.accZ() * ACC_MG_TO_G;
-
-  float gx = imu.gyrX();
-  float gy = imu.gyrY();
-  float gz = imu.gyrZ();
-
-  float mx = imu.magX();
-  float my = imu.magY();
-  float mz = imu.magZ();
+  if (!imu.dataReady()) return;
 
   unsigned long now = micros();
   float dt = (now - lastTime) * 1e-6f;
   lastTime = now;
+  if (dt <= 0.0f || dt > MAX_DT) return;
 
-  float accelRoll  = atan2(ay, az) * 180.0 / PI;
-  float accelPitch = atan2(-ax, sqrt(ay*ay + az*az)) * 180.0 / PI;
+  updateOrientation(dt);
 
-  roll  += gx * dt;
-  pitch += gy * dt;
-  yaw   += gz * dt;
+  unsigned long nowMs = millis();
+  if (nowMs - lastPrintTime >= PRINT_PERIOD_MS) {
+    lastPrintTime = nowMs;
 
-  float roll_rad = roll * PI/180.0f;
-  float pitch_rad = pitch * PI/180.0f;
-
-  float mx_h = mx * cos(pitch_rad) + mz * sin(pitch_rad);
-  float my_h = mx * sin(roll_rad)*sin(pitch_rad) +
-               my * cos(roll_rad) -
-               mz * sin(roll_rad)*cos(pitch_rad);
-
-  float yaw_mag = atan2(-my_h, mx_h) * 180.0f / PI;
-  yaw = ALPHA_YAW * yaw + (1.0f - ALPHA_YAW) * yaw_mag;
-
-  if (yaw > 180) yaw -= 360;
-  if (yaw < -180) yaw += 360;
-
-  roll  = ALPHA * roll  + (1.0 - ALPHA) * accelRoll;
-  pitch = ALPHA * pitch + (1.0 - ALPHA) * accelPitch;
-
-  // ======================================================
-  //               PACK THRESHOLD INFORMATION
-  // ======================================================
-
-  // 4 bits → resistors
-  byte R_bits = 0;
-  for (int i = 0; i < 4; i++) {
-    if (resistances[i] > R_THRESH[i]) {
-      R_bits |= (1 << i);
-    }
+    uint8_t packet = buildPacketAndPrint();
+    sendPacketSerial1(packet);
   }
 
-  // Each angle contributes 2 bits (low, high)
-  byte imu_bits = 0;
-
-  // Roll
-  if (roll < ROLL_LOW)  imu_bits |= (1 << 0);
-  if (roll > ROLL_HIGH) imu_bits |= (1 << 1);
-
-  // Pitch
-  if (pitch < PITCH_LOW)  imu_bits |= (1 << 2);
-  if (pitch > PITCH_HIGH) imu_bits |= (1 << 3);
-
-  // Yaw
-  if (yaw < YAW_LOW)  imu_bits |= (1 << 4);
-  if (yaw > YAW_HIGH) imu_bits |= (1 << 5);
-
-  // Packet = 2 bytes
-  byte packet1 = R_bits;     // 4 bits used
-  byte packet2 = imu_bits;   // 6 bits used
-
-  // ======================================================
-  //                BLUETOOTH PACKET SEND
-  // ======================================================
-
-  // Send only if packet changed
-    last_packet1 = packet1;
-    last_packet2 = packet2;
-
-
-    // ---- Send over Bluetooth (HC-05) ----
-    Serial1.write(START);
-    Serial1.write(packet1);
-    Serial1.write(packet2);
-    Serial1.write(END);
-  
-
-  // ======================================================
-  //               PRINT EVERYTHING
-  // ======================================================
-  Serial.print("R:");
-  Serial.print((int)resistances[0]); Serial.print(",");
-  Serial.print((int)resistances[1]); Serial.print(",");
-  Serial.print((int)resistances[2]); Serial.print(",");
-  Serial.print((int)resistances[3]);
-
-  Serial.print(" | Ori:");
-  Serial.print(roll, 2); Serial.print(",");
-  Serial.print(pitch, 2); Serial.print(",");
-  Serial.print(yaw, 2);
-
-  Serial.print(" | p1_dec=");
-  Serial.print(packet1);
-  Serial.print(" p2_dec=");
-  Serial.print(packet2);
-
-  Serial.print(" | Packet: ");
-  Serial.print(packet1, BIN); Serial.print(" ");
-  Serial.println(packet2, BIN);
-
-
-  delay(1000);
+  delay(5);
 }
