@@ -1,20 +1,23 @@
 #include <Wire.h>
 #include <ICM_20948.h>
+#include <WiFi.h>
+#include <WiFiUdp.h>
 
 // ========================================================
-//                    BLUETOOTH PROTOCOL (PUSH MODE)
+//                      WIFI SETUP
 // ========================================================
-constexpr uint8_t BT_FRAME_START = 0xAA;   // Arduino -> Pi
-constexpr uint8_t BT_FRAME_END   = 0x55;
+const char* ssid = "YP";
+const char* password = "ptyair101";
+const char* computerIP = "10.134.74.164";
+const int udpPort = 4210;
+
+WiFiUDP udp;
 
 // ========================================================
-//                     DEBUG OPTIONS
+//                  PACKET FRAMING
 // ========================================================
-constexpr bool USE_DEBUG_PACKET = true;    // true = counter packet, false = real glove
-constexpr bool LOG_SERIAL1      = true;   // log Serial1 TX to Serial monitor
-
-// Send rate (slower sending). Example: 50 ms => 20 Hz
-constexpr uint32_t SEND_PERIOD_MS = 20;
+constexpr uint8_t START_BYTE = 0xAA;
+constexpr uint8_t END_BYTE   = 0x55;
 
 // ========================================================
 //                       IMU SETUP
@@ -25,17 +28,15 @@ ICM_20948_I2C imu;
 constexpr float ACC_MG_TO_G = 0.001f;
 constexpr float ALPHA_RP  = 0.98f;
 constexpr float ALPHA_YAW = 0.98f;
+constexpr float MAX_DT = 0.1f;
 
-// Orientation thresholds (deg)
 constexpr float ROLL_TH  = 45.0f;
 constexpr float PITCH_TH = 30.0f;
 
-// ---- renamed to avoid SparkFun macro collision ----
 constexpr float GYRO_BIAS_DPS_X = -0.8248f;
 constexpr float GYRO_BIAS_DPS_Y =  0.1288f;
 constexpr float GYRO_BIAS_DPS_Z = -0.5285f;
 
-// Magnetometer calibration
 constexpr float MAG_OFF_X = 0.0f;
 constexpr float MAG_OFF_Y = -46.7f;
 constexpr float MAG_OFF_Z = -25.2f;
@@ -51,16 +52,10 @@ constexpr int NUM_FLEX = 4;
 int flexPins[NUM_FLEX] = {A0, A1, A2, A3};
 
 float R_FIXED[NUM_FLEX]  = {47000, 47000, 47000, 47000};
-float R_THRESH[NUM_FLEX] = {20000, 25000, 22000, 15000};
-constexpr float V_IN = 4.78;
+float R_THRESH[NUM_FLEX] = {40000, 22000, 32000, 22000};
+constexpr float V_IN = 3.3;
 
 float flexR[NUM_FLEX];
-
-// ========================================================
-//                   BLUETOOTH STATE PIN
-// ========================================================
-constexpr int BT_STATE_PIN = 4;
-bool btConnectedPrev = false;
 
 // ========================================================
 //                       DATA TYPES
@@ -74,11 +69,9 @@ struct Orientation { float roll, pitch, yaw; };
 Orientation ori{0,0,0};
 Orientation ref{0,0,0};
 
-// Debug packet counter
-uint8_t debugCounter = 0;
-
-// Periodic send timer
-uint32_t lastSendMs = 0;
+unsigned long lastTime = 0;
+unsigned long lastPrintTime = 0;
+constexpr unsigned long PRINT_PERIOD_MS = 200;
 
 // ========================================================
 //                         UTILS
@@ -96,7 +89,7 @@ uint8_t encodeAxis(float angle, float th) {
 }
 
 // ========================================================
-//                       IMU MODULE
+//                       IMU LOGIC
 // ========================================================
 void readIMU(Vec3 &acc, Vec3 &gyr, Vec3 &mag) {
   imu.getAGMT();
@@ -162,7 +155,7 @@ Orientation relativeOrientation() {
 }
 
 // ========================================================
-//                       FLEX MODULE
+//                       FLEX
 // ========================================================
 uint8_t readFlexBits() {
   uint8_t bits = 0;
@@ -172,7 +165,7 @@ uint8_t readFlexBits() {
     for (int k = 0; k < 10; k++) sum += analogRead(flexPins[i]);
 
     float adc = max(1.0f, sum / 10.0f);
-    float v = adc * (V_IN / 1023.0f);
+    float v = adc * (V_IN / 4095.0f);
     flexR[i] = R_FIXED[i] * (v / (V_IN - v));
 
     if (flexR[i] > R_THRESH[i]) bits |= (1 << i);
@@ -181,44 +174,47 @@ uint8_t readFlexBits() {
 }
 
 // ========================================================
-//                     PACKET BUILD
+//               PACKET + SERIAL PRINT
 // ========================================================
-uint8_t buildPacket() {
-  if (USE_DEBUG_PACKET) {
-    return debugCounter++;   // wraps naturally
-  }
-
-  // If you want real glove data, you should also call updateOrientation(dt)
-  // periodically and set ref somewhere. For now we keep your original structure.
+uint8_t buildPacketAndPrint() {
   Orientation rel = relativeOrientation();
+
   uint8_t rollBits  = encodeAxis(rel.roll,  ROLL_TH);
   uint8_t pitchBits = encodeAxis(rel.pitch, PITCH_TH);
   uint8_t flexBits  = readFlexBits();
 
-  return (flexBits << 4) | (rollBits << 2) | pitchBits;
-}
+  uint8_t packet =
+      (flexBits << 4) |
+      (rollBits << 2) |
+      (pitchBits);
 
-// ========================================================
-//                     SERIAL HELPERS
-// ========================================================
-void logByte(const char *tag, uint8_t b) {
-  if (!LOG_SERIAL1) return;
-  Serial.print(tag);
-  Serial.print(" 0x");
-  if (b < 0x10) Serial.print('0');
-  Serial.println(b, HEX);
-}
+  Serial.println("---- MEASUREMENTS ----");
+  Serial.print("Roll (deg):  ");  Serial.println(rel.roll, 3);
+  Serial.print("Pitch (deg): "); Serial.println(rel.pitch, 3);
 
-void sendFrameSerial1(uint8_t payload) {
-  Serial1.write(BT_FRAME_START);
-  Serial1.write(payload);
-  Serial1.write(BT_FRAME_END);
-
-  if (LOG_SERIAL1) {
-    logByte("[TX] AA", BT_FRAME_START);
-    logByte("[TX] PL", payload);
-    logByte("[TX] 55", BT_FRAME_END);
+  Serial.print("Flex R [ohm]: ");
+  for (int i = 0; i < NUM_FLEX; i++) {
+    Serial.print(flexR[i], 1);
+    Serial.print("  ");
   }
+  Serial.println();
+
+  Serial.print("PACKET BYTE: 0b");
+  Serial.println(packet, BIN);
+  Serial.println();
+
+  return packet;
+}
+
+// ========================================================
+//                   UDP SEND
+// ========================================================
+void sendPacketUDP(uint8_t data) {
+  uint8_t buf[3] = { START_BYTE, data, END_BYTE };
+
+  udp.beginPacket(computerIP, udpPort);
+  udp.write(buf, sizeof(buf));
+  udp.endPacket();
 }
 
 // ========================================================
@@ -226,47 +222,57 @@ void sendFrameSerial1(uint8_t payload) {
 // ========================================================
 void setup() {
   Serial.begin(115200);
-  Serial1.begin(9600);   // HC-05 default is commonly 9600 in AT-mode / data-mode setups
+  delay(1000);
 
-  pinMode(BT_STATE_PIN, INPUT);
+  Serial.println("\n--- System starting ---");
 
   Wire.begin();
   Wire.setClock(400000);
 
-  Serial.println("=== Arduino BT PUSH-mode (periodic sender) ===");
+  imu.begin(Wire, AD0_VAL);
+  if (imu.status != ICM_20948_Stat_Ok) {
+    Serial.println("IMU init failed");
+    while (1);
+  }
+
+  Vec3 acc, gyr, mag;
+  readIMU(acc, gyr, mag);
+  ori = accelOrientation(acc);
+  ori.yaw = magYaw(mag, ori.roll, ori.pitch);
+  ref = ori;
+
+  WiFi.begin(ssid, password);
+  Serial.print("Connecting WiFi");
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("\nWiFi connected");
+
+  udp.begin(udpPort);
+
+  lastTime = micros();
+  Serial.println("System ready");
 }
 
 // ========================================================
 //                           LOOP
 // ========================================================
 void loop() {
-  // ---- monitor BT state ----
-  bool btNow = digitalRead(BT_STATE_PIN);
-  if (btNow != btConnectedPrev) {
-    Serial.println(btNow ? "[BT] CONNECTED" : "[BT] DISCONNECTED");
-    btConnectedPrev = btNow;
+  unsigned long now = micros();
+  float dt = (now - lastTime) * 1e-6f;
+  lastTime = now;
+  if (dt <= 0.0f || dt > MAX_DT) return;
+
+  updateOrientation(dt);
+
+  unsigned long nowMs = millis();
+  if (nowMs - lastPrintTime >= PRINT_PERIOD_MS) {
+    lastPrintTime = nowMs;
+
+    uint8_t packet = buildPacketAndPrint();
+    sendPacketUDP(packet);
   }
 
-  // Only send when connected (STATE pin HIGH)
-  if (!btNow) {
-    // Optionally: reset timer so it sends quickly once reconnected
-    lastSendMs = millis();
-    return;
-  }
-
-  // ---- periodic send ----
-  uint32_t nowMs = millis();
-  if (nowMs - lastSendMs >= SEND_PERIOD_MS) {
-    lastSendMs = nowMs;
-
-    // Build payload and send one framed packet
-    uint8_t pkt = buildPacket();
-
-    // If you still want to force constant payload for testing, uncomment:
-    // pkt = 0x01;
-
-    sendFrameSerial1(pkt);
-  }
-
-  // Note: no reading Serial1 at all in push mode.
+  delay(5);
 }
