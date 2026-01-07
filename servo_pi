@@ -1,0 +1,27 @@
+from gpiozero import Servo
+from time import sleep
+
+# הגדרת הפין (pin 11)
+# GND (pin 6)
+# בגלל שזה מנוע גדול, לעיתים טווח הפולסים (Min/Max) דורש כיוונון עדין
+# 0.0005 ו-0.0025 הם ערכי ברירת מחדל נפוצים
+servo = Servo(17, min_pulse_width=0.5 / 1000, max_pulse_width=2.5 / 1000)
+
+try:
+    print("Starting motor... Press Ctrl+C to stop")
+    while True:
+        print("Full speed forward")
+        servo.value = 1  # מקביל ל-180 מעלות (מהירות מקסימלית קדימה)
+        sleep(2)
+
+        print("Stop")
+        servo.value = 0  # מקביל ל-90 מעלות (עצירה)
+        sleep(2)
+
+        print("Full speed backward")
+        servo.value = -1  # מקביל ל-0 מעלות (מהירות מקסימלית אחורה)
+        sleep(2)
+
+except KeyboardInterrupt:
+    print("\nProgram stopped")
+    servo.detach()  # משחרר את הפין
