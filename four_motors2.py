@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-from gpiozero import OutputDevice
+from gpiozero import PWMOutputDevice
 import time
-import RPi.GPIO as GPIO
 import socket
-
+from typing import Optional
+import RPi.GPIO as GPIO
 
 # ============================================================
 # INPUT MODE
@@ -21,10 +21,10 @@ UDP_LISTEN_IP = "0.0.0.0"
 UDP_PORT = 4210
 
 FRAME_START = 0xAA
-FRAME_END   = 0x55
+FRAME_END = 0x55
 
-CONTROL_PERIOD_SEC  = 0.01
-SILENCE_STOP_SEC    = 0.7
+CONTROL_PERIOD_SEC = 0.01
+SILENCE_STOP_SEC = 0.7
 
 # ============================================================
 # GPIO SETUP (BCM numbering)
@@ -32,12 +32,25 @@ SILENCE_STOP_SEC    = 0.7
 GPIO.setmode(GPIO.BCM)
 GPIO.setwarnings(False)
 
-# Ultrasonic sensor
+# ============================================================
+# ULTRASONIC SENSOR (HC-SR04 style)
+#   TRIG = BCM 5 (physical 29)
+#   ECHO = BCM 6 (physical 31)
+# ============================================================
 TRIG = 5
 ECHO = 6
 GPIO.setup(TRIG, GPIO.OUT)
 GPIO.setup(ECHO, GPIO.IN)
-THRESHOLD_CM = 50
+
+ULTRA_ENABLED = True
+ULTRA_STOP_CM = 40.0
+
+ULTRA_MEASURE_PERIOD_SEC = 0.10   # measure at 10 Hz
+ULTRA_PRINT_PERIOD_SEC = 0.50     # print at 2 Hz
+
+_last_ultra_t = 0.0
+_last_ultra_print_t = 0.0
+_last_distance_cm: Optional[float] = None
 
 # ============================================================
 # SERVO (pigpio)
@@ -61,7 +74,7 @@ def servo_init():
         return
     _pi = pigpio.pi()
     if not _pi.connected:
-        print("WARNING: pigpio daemon not running")
+        print("WARNING: pigpio daemon not running (sudo systemctl enable --now pigpiod)")
         _pi = None
         return
     _pi.set_servo_pulsewidth(SERVO_PIN, SERVO_NEUTRAL_US)
@@ -73,6 +86,9 @@ def servo_stop():
 
 
 def servo_spin(direction_bit: int):
+    """
+    direction_bit: 1 or 0 (chooses pulsewidth above/below neutral)
+    """
     if _pi is None:
         return
     pw = SERVO_NEUTRAL_US + SERVO_SPIN_DELTA_US if direction_bit else SERVO_NEUTRAL_US - SERVO_SPIN_DELTA_US
@@ -88,25 +104,56 @@ def servo_cleanup():
 
 
 # ============================================================
-# DC MOTORS (IBT-2)
+# DC MOTORS (IBT-2) -- PWM + trim
 # ============================================================
-M1_RPWM = OutputDevice(18)
-M1_LPWM = OutputDevice(23)
-M2_RPWM = OutputDevice(24)
-M2_LPWM = OutputDevice(25)
+PWM_HZ = 1000
+
+# M1 (right motor in your current mapping)
+M1_RPWM = PWMOutputDevice(18, frequency=PWM_HZ, initial_value=0)
+M1_LPWM = PWMOutputDevice(23, frequency=PWM_HZ, initial_value=0)
+
+# M2 (LEFT motor: physical pins 18+22 -> BCM 24+25)
+M2_RPWM = PWMOutputDevice(24, frequency=PWM_HZ, initial_value=0)
+M2_LPWM = PWMOutputDevice(25, frequency=PWM_HZ, initial_value=0)
+
+# Tune this to remove drift (left motor slower => < 1.0)
+M1_SCALE = 1.00
+M2_SCALE = 0.90
+
+
+def _clamp01(x: float) -> float:
+    return 0.0 if x < 0.0 else (1.0 if x > 1.0 else x)
 
 
 def motor_stop():
-    M1_RPWM.off()
-    M1_LPWM.off()
-    M2_RPWM.off()
-    M2_LPWM.off()
+    M1_RPWM.value = 0.0
+    M1_LPWM.value = 0.0
+    M2_RPWM.value = 0.0
+    M2_LPWM.value = 0.0
 
 
-def motor1_forward():  M1_RPWM.on();  M1_LPWM.off()
-def motor1_reverse():  M1_RPWM.off(); M1_LPWM.on()
-def motor2_forward():  M2_RPWM.on();  M2_LPWM.off()
-def motor2_reverse():  M2_RPWM.off(); M2_LPWM.on()
+def motor1_forward(speed: float = 1.0):
+    s = _clamp01(speed) * M1_SCALE
+    M1_RPWM.value = s
+    M1_LPWM.value = 0.0
+
+
+def motor1_reverse(speed: float = 1.0):
+    s = _clamp01(speed) * M1_SCALE
+    M1_RPWM.value = 0.0
+    M1_LPWM.value = s
+
+
+def motor2_forward(speed: float = 1.0):
+    s = _clamp01(speed) * M2_SCALE
+    M2_RPWM.value = s
+    M2_LPWM.value = 0.0
+
+
+def motor2_reverse(speed: float = 1.0):
+    s = _clamp01(speed) * M2_SCALE
+    M2_RPWM.value = 0.0
+    M2_LPWM.value = s
 
 
 # ============================================================
@@ -122,7 +169,7 @@ class StepperMotor:
             [1, 0, 1, 0],
             [0, 1, 1, 0],
             [0, 1, 0, 1],
-            [1, 0, 0, 1],
+            [0, 0, 1, 1],  # slight variant sometimes helps; keep if your wiring likes it
         ]
 
         for pin in self.pins:
@@ -130,17 +177,11 @@ class StepperMotor:
             GPIO.output(pin, 0)
 
     def move(self, steps, direction=1, speed=0.005):
-        """
-        Rotate the motor.
-        steps: number of step-cycles to run
-        direction: 1 (one way), -1 (the other way)
-        speed: delay between micro-states in seconds (smaller=faster)
-        """
         if direction not in (1, -1):
             raise ValueError("direction must be 1 or -1")
 
         try:
-            for _ in range(steps):
+            for _ in range(int(steps)):
                 for step in range(len(self.seq)):
                     step_index = step if direction == 1 else (len(self.seq) - 1 - step)
                     pattern = self.seq[step_index]
@@ -156,7 +197,7 @@ class StepperMotor:
 
 
 # Used already: 5,6,12,18,23,24,25
-STEPPER_PINS = [16, 19, 20, 21]   # L298N IN1..IN4
+STEPPER_PINS = [16, 19, 20, 21]  # L298N IN1..IN4
 _stepper = StepperMotor("Stepper(L298N)", STEPPER_PINS)
 
 STEPPER_SPEED_SEC = 0.005
@@ -175,37 +216,70 @@ def stepper_move(steps: int, direction: int):
 # ============================================================
 # ULTRASONIC
 # ============================================================
-def measure_distance():
+def measure_distance_cm() -> Optional[float]:
+    """
+    Returns distance in cm or None on timeout.
+    """
     GPIO.output(TRIG, False)
     time.sleep(0.0002)
+
     GPIO.output(TRIG, True)
     time.sleep(0.00001)
     GPIO.output(TRIG, False)
 
-    start = time.time()
+    t0 = time.time()
     while GPIO.input(ECHO) == 0:
-        if time.time() - start > 0.05:
+        if time.time() - t0 > 0.03:
             return None
 
     pulse_start = time.time()
     while GPIO.input(ECHO) == 1:
-        if time.time() - pulse_start > 0.05:
+        if time.time() - pulse_start > 0.03:
             return None
 
     pulse_end = time.time()
-    return round((pulse_end - pulse_start) * 17150, 2)
+    return (pulse_end - pulse_start) * 17150.0
+
+
+def ultrasonic_tick() -> Optional[float]:
+    """
+    Periodically measures + periodically prints.
+    Updates _last_distance_cm and returns it.
+    """
+    global _last_ultra_t, _last_ultra_print_t, _last_distance_cm
+
+    now = time.time()
+    if not ULTRA_ENABLED:
+        return _last_distance_cm
+
+    if now - _last_ultra_t >= ULTRA_MEASURE_PERIOD_SEC:
+        _last_ultra_t = now
+        _last_distance_cm = measure_distance_cm()
+
+    if now - _last_ultra_print_t >= ULTRA_PRINT_PERIOD_SEC:
+        _last_ultra_print_t = now
+        if _last_distance_cm is None:
+            print("[ULTRA] dist=None (timeout)")
+        else:
+            print(f"[ULTRA] dist={_last_distance_cm:.1f} cm")
+
+    return _last_distance_cm
+
+
+def ultrasonic_too_close() -> bool:
+    return ULTRA_ENABLED and (_last_distance_cm is not None) and (_last_distance_cm < ULTRA_STOP_CM)
 
 
 # ============================================================
-# UDP HELPERS
+# UDP HELPERS (reliable like your working receiver)
 # ============================================================
 def open_udp_socket_forever(bind_ip: str, bind_port: int):
     while True:
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            # Intentionally NOT using SO_REUSEADDR (helps catch port-conflicts loudly)
             s.bind((bind_ip, bind_port))
-            s.settimeout(0.2)  # IMPORTANT: blocking with timeout (like your working script)
+            s.settimeout(0.05)  # 50ms blocking wait
             print(f"[UDP] Listening on {bind_ip}:{bind_port}")
             return s
         except Exception as e:
@@ -213,11 +287,10 @@ def open_udp_socket_forever(bind_ip: str, bind_port: int):
             time.sleep(1.0)
 
 
-
-def read_latest_udp_payload(sock):
+def read_one_udp_payload(sock) -> Optional[int]:
     """
-    Waits up to socket timeout for a UDP datagram.
-    Expects exactly: 0xAA <payload> 0x55
+    Receives one UDP datagram (or times out).
+    Expects: 0xAA <payload> 0x55
     Returns payload (0..255) or None.
     """
     try:
@@ -229,48 +302,79 @@ def read_latest_udp_payload(sock):
         return None
 
     if len(data) >= 3 and data[0] == FRAME_START and data[2] == FRAME_END:
-        return data[1]
+        return int(data[1])
     return None
-
 
 
 # ============================================================
 # PAYLOAD HANDLER
 # ============================================================
+_last_ultra_block_print = 0.0
+
 def handle_payload(payload: int):
+    global _last_ultra_block_print
+
     flex = (payload >> 4) & 0x0F
-    roll_code  = (payload >> 2) & 0x03
+    roll_code = (payload >> 2) & 0x03
     pitch_code = payload & 0x03
 
     print(f"[GLOVE] payload=0x{payload:02X}")
 
-    # FLEX
+    # FLEX bits
     f0 = (flex >> 0) & 1
     f1 = (flex >> 1) & 1
     f2 = (flex >> 2) & 1
     f3 = (flex >> 3) & 1
 
-    # Servo
+    # Servo (independent)
     servo_spin(f1) if f0 else servo_stop()
 
-    # Stepper
+    # Stepper (independent)
     if f2 and not f3:
         stepper_move(STEPPER_STEP_CHUNK, 1)
     elif f3 and not f2:
         stepper_move(STEPPER_STEP_CHUNK, 0)
 
-    # DC motors
+    # Decide desired DC drive action
+    # (same logic as before)
+    desired = "stop"
     if pitch_code == 0b01:
-        motor1_forward(); motor2_forward()
+        desired = "forward"
     elif pitch_code == 0b10:
-        motor1_reverse(); motor2_reverse()
+        desired = "reverse"
     else:
         if roll_code == 0b01:
-            motor1_forward(); motor2_reverse()
+            desired = "turn_right"
         elif roll_code == 0b10:
-            motor1_reverse(); motor2_forward()
+            desired = "turn_left"
         else:
-            motor_stop()
+            desired = "stop"
+
+    # Ultrasonic safety:
+    # If too close (<40cm), BLOCK forward/turn, but allow reverse to back away.
+    if ultrasonic_too_close() and desired in ("forward", "turn_left", "turn_right"):
+        motor_stop()
+        now = time.time()
+        if now - _last_ultra_block_print > 0.5:
+            _last_ultra_block_print = now
+            print(f"[ULTRA] BLOCK DRIVE: {_last_distance_cm:.1f} cm < {ULTRA_STOP_CM:.1f} cm")
+        return
+
+    # Execute DC drive
+    if desired == "forward":
+        motor1_forward()
+        motor2_forward()
+    elif desired == "reverse":
+        motor1_reverse()
+        motor2_reverse()
+    elif desired == "turn_right":
+        motor1_forward()
+        motor2_reverse()
+    elif desired == "turn_left":
+        motor1_reverse()
+        motor2_forward()
+    else:
+        motor_stop()
 
 
 # ============================================================
@@ -278,27 +382,19 @@ def handle_payload(payload: int):
 # ============================================================
 def run_glove_loop():
     print("[GLOVE] WiFi UDP mode (listen-only)")
-    sock = None
+    sock = open_udp_socket_forever(UDP_LISTEN_IP, UDP_PORT)
 
     last_rx = time.time()
     last_stop_action = 0.0
-
     last_silence_report = 0.0
     SILENCE_REPORT_EVERY = 0.5
 
-    last_loop_t = time.time()
-
     try:
         while True:
-            if sock is None:
-                sock = open_udp_socket_forever(UDP_LISTEN_IP, UDP_PORT)
-                now = time.time()
-                last_rx = now
-                last_stop_action = 0.0
-                last_silence_report = 0.0
-                last_loop_t = now
+            # ultrasonic runs continuously + prints periodically
+            ultrasonic_tick()
 
-            payload = read_latest_udp_payload(sock)
+            payload = read_one_udp_payload(sock)
 
             if payload is not None:
                 now = time.time()
@@ -308,7 +404,7 @@ def run_glove_loop():
                 last_rx = now
 
                 t0 = time.time()
-                handle_payload(int(payload))
+                handle_payload(payload)
                 t1 = time.time()
                 handle_ms = (t1 - t0) * 1000.0
                 if handle_ms > 50.0:
@@ -328,21 +424,20 @@ def run_glove_loop():
                     _stepper.stop()
                     last_stop_action = now
 
-            loop_end = time.time()
-            loop_dt = loop_end - last_loop_t
-            last_loop_t = loop_end
-            if loop_dt > 0.2:
-                print(f"[DBG][LOOP] loop_dt={loop_dt:.3f}s (loop stalled)")
-
             time.sleep(CONTROL_PERIOD_SEC)
 
     except KeyboardInterrupt:
         pass
     finally:
-        if sock:
+        try:
             sock.close()
+        except Exception:
+            pass
 
 
+# ============================================================
+# KEYBOARD MODE
+# ============================================================
 def run_keyboard_loop():
     """
     Controls:
@@ -362,6 +457,8 @@ def run_keyboard_loop():
 
     try:
         while True:
+            ultrasonic_tick()
+
             cmd = input("cmd> ").strip()
             if not cmd:
                 continue
@@ -377,11 +474,15 @@ def run_keyboard_loop():
                 _stepper.stop()
                 print("[KEYBOARD] stop all")
 
-            # DC motors
+            # DC motors (apply ultrasonic safety the same way)
             elif c == "w":
-                motor1_forward()
-                motor2_forward()
-                print("[KEYBOARD] forward")
+                if ultrasonic_too_close():
+                    motor_stop()
+                    print(f"[ULTRA] BLOCK FORWARD: {_last_distance_cm:.1f} cm < {ULTRA_STOP_CM:.1f} cm")
+                else:
+                    motor1_forward()
+                    motor2_forward()
+                    print("[KEYBOARD] forward")
 
             elif c == "s":
                 motor1_reverse()
@@ -389,14 +490,22 @@ def run_keyboard_loop():
                 print("[KEYBOARD] reverse")
 
             elif c == "a":
-                motor1_reverse()
-                motor2_forward()
-                print("[KEYBOARD] turn left (in place)")
+                if ultrasonic_too_close():
+                    motor_stop()
+                    print(f"[ULTRA] BLOCK TURN: {_last_distance_cm:.1f} cm < {ULTRA_STOP_CM:.1f} cm")
+                else:
+                    motor1_reverse()
+                    motor2_forward()
+                    print("[KEYBOARD] turn left (in place)")
 
             elif c == "d":
-                motor1_forward()
-                motor2_reverse()
-                print("[KEYBOARD] turn right (in place)")
+                if ultrasonic_too_close():
+                    motor_stop()
+                    print(f"[ULTRA] BLOCK TURN: {_last_distance_cm:.1f} cm < {ULTRA_STOP_CM:.1f} cm")
+                else:
+                    motor1_forward()
+                    motor2_reverse()
+                    print("[KEYBOARD] turn right (in place)")
 
             # Servo
             elif c == "i":
