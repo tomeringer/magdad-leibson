@@ -13,7 +13,7 @@ class CSVMetricLogger:
 
     def log(self, **row):
         # add timestamp automatically
-        row.setdefault("t_unix", time.time())
+        row.setdefault("t", time.time())
         self.w.writerow(row)
         self.f.flush()  # so you can tail/plot while running
 
