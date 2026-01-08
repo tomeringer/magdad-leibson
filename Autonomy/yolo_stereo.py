@@ -152,7 +152,7 @@ if __name__ == '__main__':
     if maps_l is None:
         exit()
 
-    print("Starting YOLOv8 Stereo Detection. Press 'q' to quit.")
+    print("Starting YOLOv8 Stereo Detection.")
 
     while True:
         t0 = time.perf_counter()
