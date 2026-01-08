@@ -1,6 +1,7 @@
 import pickle
 import time
 from datetime import datetime
+import sys
 
 import cv2
 import numpy as np
@@ -11,7 +12,10 @@ import lib_logger
 
 # --- FUNCTION TO LOAD AND PREPARE CALIBRATION DATA ---
 def open_cam(path: str, name: str):
-    cap = cv2.VideoCapture(path, cv2.CAP_V4L2)
+    if windows:
+        cap = cv2.VideoCapture(path)
+    else:
+        cap = cv2.VideoCapture(path, cv2.CAP_V4L2)
     print(f"{name}: opening {path}  isOpened={cap.isOpened()}")
     if not cap.isOpened():
         return cap
@@ -117,15 +121,20 @@ if __name__ == '__main__':
     ts = datetime.now().strftime("%Y%m%d_%H%M")
     metrics = lib_logger.CSVMetricLogger(
         f"cam_logs/log{ts}.csv",
-        fieldnames=["t_unix", "bottle_x", "bottle_y", "bottle_z", "t_proc"]
+        fieldnames=["t", "bottle_x", "bottle_y", "bottle_z", "t_proc"]
     )
 
     # Path to your generated stereo calibration file
     CALIBRATION_FILE_PATH = r"stereo_calibration.pkl"
 
     # Indices of your USB cameras (must match the cameras used for calibration)
-    LEFT = "/dev/v4l/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.4:1.0-video-index0"
-    RIGHT = "/dev/v4l/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0"
+    windows = (sys.platform == "win32")
+    if windows:
+        LEFT = 1
+        RIGHT = 0
+    else:
+        LEFT = "/dev/v4l/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.4:1.0-video-index0"
+        RIGHT = "/dev/v4l/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0"
 
     # Image size (Assuming 640x480 as in the previous example,
     # but this should match the size used during calibration!)
