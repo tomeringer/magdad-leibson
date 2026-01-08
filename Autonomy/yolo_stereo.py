@@ -4,6 +4,7 @@ import cv2
 import numpy as np
 import lib_logger
 from ultralytics import YOLO
+from datetime import datetime
 
 
 # --- FUNCTION TO LOAD AND PREPARE CALIBRATION DATA ---
@@ -111,8 +112,9 @@ def calculate_3d_coords(disparity, x, y, Q_matrix):
 
 if __name__ == '__main__':
     # --- CONFIGURATION ---
+    ts = datetime.now().strftime("%Y%m%d_%H%M")
     metrics = lib_logger.CSVMetricLogger(
-        "/home/libson/magdad-leibson/log.csv",
+        f"/home/libson/magdad-leibson/log{ts}.csv",
         fieldnames=["t_unix", "bottle_x", "bottle_y", "bottle_z", "total_t"]
     )
 
