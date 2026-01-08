@@ -112,7 +112,7 @@ def calculate_3d_coords(disparity, x, y, Q_matrix):
 if __name__ == '__main__':
     # --- CONFIGURATION ---
     metrics = lib_logger.CSVMetricLogger(
-        "~/magdad-leibson/log.csv",
+        "/home/libson/magdad-leibson/log.csv",
         fieldnames=["t_unix", "bottle_x", "bottle_y", "bottle_z", "total_t"]
     )
 
