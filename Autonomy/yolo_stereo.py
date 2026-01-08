@@ -1,10 +1,12 @@
 import pickle
+import time
+from datetime import datetime
 
 import cv2
 import numpy as np
-import lib_logger
 from ultralytics import YOLO
-from datetime import datetime
+
+import lib_logger
 
 
 # --- FUNCTION TO LOAD AND PREPARE CALIBRATION DATA ---
@@ -115,7 +117,7 @@ if __name__ == '__main__':
     ts = datetime.now().strftime("%Y%m%d_%H%M")
     metrics = lib_logger.CSVMetricLogger(
         f"/home/libson/magdad-leibson/log{ts}.csv",
-        fieldnames=["t_unix", "bottle_x", "bottle_y", "bottle_z", "total_t"]
+        fieldnames=["t_unix", "bottle_x", "bottle_y", "bottle_z", "t_proc"]
     )
 
     # Path to your generated stereo calibration file
@@ -153,6 +155,7 @@ if __name__ == '__main__':
     print("Starting YOLOv8 Stereo Detection. Press 'q' to quit.")
 
     while True:
+        t0 = time.perf_counter()
         print("Running")
         ret_l, frame_l_orig = cap_l.read()
         ret_r, frame_r_orig = cap_r.read()
@@ -177,6 +180,7 @@ if __name__ == '__main__':
         # --- 3. 3D Depth Calculation (Association & Reprojection) ---
 
         # Process the most confident detection from the left frame
+        X, Y, Z = None, None, None
         if results_l and len(results_l[0].boxes) > 0:
             box_l = results_l[0].boxes[0]
             # Get the center of the bounding box
@@ -216,6 +220,9 @@ if __name__ == '__main__':
         # Exit on 'q' key press
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
+
+        t_total = time.perf_counter() - t0
+        metrics.log(t_unix=time.perf_counter(), bottle_x=X, bottle_y=Y, bottle_z=Z, t_proc=t_total)
 
     # Release resources
     cap_l.release()
