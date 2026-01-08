@@ -14,9 +14,9 @@ RIGHT = "/dev/v4l/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-
 # Image size (Assuming 640x480 as in the previous example, 
 # but this should match the size used during calibration!)
 # We will read the size from the frame, but setting a default is good.
-W = 320
-H = 240
-CAM_FPS = 10
+W = 640
+H = 480
+CAM_FPS = 15
 DEFAULT_IMG_SIZE = (W, H) 
 
 # Load the YOLOv8 model (YOLOv8n for fast inference)
@@ -129,6 +129,8 @@ def calculate_3d_coords(disparity, x, y, Q_matrix):
     
     return (X, Y, Z)
 
+cap_l = open_cam(LEFT, "LEFT")
+cap_r = open_cam(RIGHT, "RIGHT")
 
 # --- MAIN LOGIC ---
 # Load and prepare calibration data, and get the image size
@@ -136,9 +138,6 @@ maps_l, maps_r, Q_matrix, img_size = load_and_prepare_calibration(CALIBRATION_FI
 
 if maps_l is None:
     exit()
-
-cap_l = open_cam(LEFT, "LEFT")
-cap_r = open_cam(RIGHT, "RIGHT")
 
 print("Starting YOLOv8 Stereo Detection. Press 'q' to quit.")
 
