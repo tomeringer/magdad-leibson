@@ -174,8 +174,8 @@ if __name__ == '__main__':
         results_l = model.predict(frame_l_rect, conf=0.50, classes=[BOTTLE_CLASS_ID], verbose=False)
         results_r = model.predict(frame_r_rect, conf=0.50, classes=[BOTTLE_CLASS_ID], verbose=False)
 
-        annotated_l = results_l[0].plot()
-        annotated_r = results_r[0].plot()
+        #annotated_l = results_l[0].plot()
+        #annotated_r = results_r[0].plot()
 
         # --- 3. 3D Depth Calculation (Association & Reprojection) ---
 
@@ -209,17 +209,13 @@ if __name__ == '__main__':
                     # Draw the 3D coordinates (Z is the depth) onto the left frame
                     # Units (mm/cm/m) depend on how the Translation vector T was calibrated.
                     text = f"X: {X:.1f}cm, Y: {Y:.1f}cm, Z: {Z:.1f}cm"
-                    cv2.putText(annotated_l, text, (x_l - 150, y_l - 40),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+                    #cv2.putText(annotated_l, text, (x_l - 150, y_l - 40),
+                    #            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
                     print(text)
 
         # --- 4. Display ---
         # Concatenate the two annotated frames
-        combined_frame = np.concatenate((annotated_l, annotated_r), axis=1)
-
-        # Exit on 'q' key press
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
+        #combined_frame = np.concatenate((annotated_l, annotated_r), axis=1)
 
         t_total = time.perf_counter() - t0
         metrics.log(t_unix=time.perf_counter(), bottle_x=X, bottle_y=Y, bottle_z=Z, t_proc=t_total)
