@@ -116,7 +116,7 @@ if __name__ == '__main__':
     # --- CONFIGURATION ---
     ts = datetime.now().strftime("%Y%m%d_%H%M")
     metrics = lib_logger.CSVMetricLogger(
-        f"/home/libson/magdad-leibson/log{ts}.csv",
+        f"/home/libson/magdad-leibson/Autonomy/cam_logs/log{ts}.csv",
         fieldnames=["t_unix", "bottle_x", "bottle_y", "bottle_z", "t_proc"]
     )
 
