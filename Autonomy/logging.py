@@ -20,11 +20,5 @@ class CSVMetricLogger:
     def close(self):
         self.f.close()
 
-
-metrics = CSVMetricLogger(
-    "/home/pi/metrics.csv",
-    fieldnames=["t_unix", "frame", "dt_ms", "detected", "score", "area"]
-)
-
 # inside your loop:
 # metrics.log(frame=i, dt_ms=dt*1000, detected=int(found), score=conf, area=blob_area)
