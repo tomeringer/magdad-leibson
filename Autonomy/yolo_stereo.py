@@ -116,12 +116,12 @@ if __name__ == '__main__':
     # --- CONFIGURATION ---
     ts = datetime.now().strftime("%Y%m%d_%H%M")
     metrics = lib_logger.CSVMetricLogger(
-        f"/home/libson/magdad-leibson/Autonomy/cam_logs/log{ts}.csv",
+        f"cam_logs/log{ts}.csv",
         fieldnames=["t_unix", "bottle_x", "bottle_y", "bottle_z", "t_proc"]
     )
 
     # Path to your generated stereo calibration file
-    CALIBRATION_FILE_PATH = r"/home/libson/magdad-leibson/Autonomy/stereo_calibration.pkl"
+    CALIBRATION_FILE_PATH = r"stereo_calibration.pkl"
 
     # Indices of your USB cameras (must match the cameras used for calibration)
     LEFT = "/dev/v4l/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.4:1.0-video-index0"
