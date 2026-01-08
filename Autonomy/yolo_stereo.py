@@ -2,7 +2,7 @@ import pickle
 
 import cv2
 import numpy as np
-import logging
+import lib_logger
 from ultralytics import YOLO
 
 
@@ -111,7 +111,7 @@ def calculate_3d_coords(disparity, x, y, Q_matrix):
 
 if __name__ == '__main__':
     # --- CONFIGURATION ---
-    metrics = logging.CSVMetricLogger(
+    metrics = lib_logger.CSVMetricLogger(
         "~/magdad-leibson/log.csv",
         fieldnames=["t_unix", "bottle_x", "bottle_y", "bottle_z", "total_t"]
     )
