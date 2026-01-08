@@ -156,7 +156,7 @@ if __name__ == '__main__':
 
     while True:
         t0 = time.perf_counter()
-        print("Running")
+
         ret_l, frame_l_orig = cap_l.read()
         ret_r, frame_r_orig = cap_r.read()
 
