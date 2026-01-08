@@ -2,10 +2,120 @@ import pickle
 
 import cv2
 import numpy as np
+import logging
 from ultralytics import YOLO
+
+
+# --- FUNCTION TO LOAD AND PREPARE CALIBRATION DATA ---
+def open_cam(path: str, name: str):
+    cap = cv2.VideoCapture(path, cv2.CAP_V4L2)
+    print(f"{name}: opening {path}  isOpened={cap.isOpened()}")
+    if not cap.isOpened():
+        return cap
+
+    # Force MJPG (compressed) to reduce USB bandwidth
+    cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, W)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, H)
+    cap.set(cv2.CAP_PROP_FPS, CAM_FPS)
+
+    # Keep a small buffer; 1 can be too aggressive on some drivers
+    cap.set(cv2.CAP_PROP_BUFFERSIZE, 2)
+
+    # Warm up
+    for _ in range(10):
+        cap.read()
+
+    print(f"{name}: negotiated "
+          f"{cap.get(cv2.CAP_PROP_FRAME_WIDTH):.0f}x{cap.get(cv2.CAP_PROP_FRAME_HEIGHT):.0f} "
+          f"@ {cap.get(cv2.CAP_PROP_FPS):.1f}fps "
+          f"fourcc={int(cap.get(cv2.CAP_PROP_FOURCC))}")
+    return cap
+
+
+def load_and_prepare_calibration(file_path):
+    """
+    Loads stereo parameters (K, D, R, T, Q) from the .pkl file
+    and computes the necessary rectification maps (R1, P1, etc.).
+    """
+    try:
+        with open(file_path, 'rb') as f:
+            data = pickle.load(f)
+
+        # *** Adjusted to match the keys in your stereo_calibration2.pkl file ***
+        K1 = data['cameraMatrix1']
+        D1 = data['distCoeffs1']
+        K2 = data['cameraMatrix2']
+        D2 = data['distCoeffs2']
+        R = data['R']
+        T = data['T']
+        Q = data['Q']  # Q matrix is already computed
+
+    except Exception as e:
+        print(f"Error loading calibration file: {e}")
+        print("Ensure the file exists and the internal keys (cameraMatrix1, R, T, Q etc.) are correct.")
+        return None, None, None, None
+
+    # We need the image shape from the camera, let's open them first to get the size.
+    # cap_test = cv2.VideoCapture(RIGHT, cv2.CAP_V4L2)
+    # cap_test.set(cv2.CAP_PROP_FRAME_WIDTH, DEFAULT_IMG_SIZE[0])
+    # cap_test.set(cv2.CAP_PROP_FRAME_HEIGHT, DEFAULT_IMG_SIZE[1])
+    # ret, frame = cap_test.read()
+    # cap_test.release()
+
+    # if not ret:
+    #    print("Error: Could not read a frame to determine image size.")
+    #    return None, None, None, None
+
+    img_size = DEFAULT_IMG_SIZE  # (width, height)
+    print(f"Using image size: {img_size}")
+
+    # Since your calibration file did not store R1, R2, P1, P2 directly, we re-compute them
+    # using cv2.stereoRectify which only needs K, D, R, T.
+    R1, R2, P1, P2, _, _, _ = cv2.stereoRectify(
+        cameraMatrix1=K1, distCoeffs1=D1,
+        cameraMatrix2=K2, distCoeffs2=D2,
+        imageSize=img_size, R=R, T=T,
+        alpha=-1
+    )
+
+    # Create the Rectification Maps (interpolation maps)
+    map1_l, map2_l = cv2.initUndistortRectifyMap(K1, D1, R1, P1, img_size, cv2.CV_32FC1)
+    map1_r, map2_r = cv2.initUndistortRectifyMap(K2, D2, R2, P2, img_size, cv2.CV_32FC1)
+
+    print("Stereo calibration loaded and rectification maps created successfully.")
+    return (map1_l, map2_l), (map1_r, map2_r), Q, img_size
+
+
+# --- FUNCTION TO CALCULATE 3D DEPTH ---
+def calculate_3d_coords(disparity, x, y, Q_matrix):
+    """
+    Computes 3D coordinates (X, Y, Z) from a pixel (x, y) and its disparity value.
+    """
+    # Using the standard Reprojection formula: Q * [x, y, disparity, 1].T
+    # This is a key step in stereo vision for depth estimation.
+    point = np.array([x, y, disparity, 1], dtype=np.float32)
+
+    homogeneous_point = np.dot(Q_matrix, point)
+
+    w = homogeneous_point[3]
+    if w == 0:
+        return (0, 0, 0)
+
+    X = homogeneous_point[0] / w
+    Y = homogeneous_point[1] / w
+    Z = homogeneous_point[2] / w
+
+    return (X, Y, Z)
+
 
 if __name__ == '__main__':
     # --- CONFIGURATION ---
+    metrics = logging.CSVMetricLogger(
+        "~/magdad-leibson/log.csv",
+        fieldnames=["t_unix", "bottle_x", "bottle_y", "bottle_z", "total_t"]
+    )
+
     # Path to your generated stereo calibration file
     CALIBRATION_FILE_PATH = r"/home/libson/magdad-leibson/Autonomy/stereo_calibration.pkl"
 
@@ -27,110 +137,6 @@ if __name__ == '__main__':
 
     # COCO dataset class ID for 'bottle'
     BOTTLE_CLASS_ID = 39
-
-
-    # --- FUNCTION TO LOAD AND PREPARE CALIBRATION DATA ---
-    def open_cam(path: str, name: str):
-        cap = cv2.VideoCapture(path, cv2.CAP_V4L2)
-        print(f"{name}: opening {path}  isOpened={cap.isOpened()}")
-        if not cap.isOpened():
-            return cap
-
-        # Force MJPG (compressed) to reduce USB bandwidth
-        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, W)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, H)
-        cap.set(cv2.CAP_PROP_FPS, CAM_FPS)
-
-        # Keep a small buffer; 1 can be too aggressive on some drivers
-        cap.set(cv2.CAP_PROP_BUFFERSIZE, 2)
-
-        # Warm up
-        for _ in range(10):
-            cap.read()
-
-        print(f"{name}: negotiated "
-              f"{cap.get(cv2.CAP_PROP_FRAME_WIDTH):.0f}x{cap.get(cv2.CAP_PROP_FRAME_HEIGHT):.0f} "
-              f"@ {cap.get(cv2.CAP_PROP_FPS):.1f}fps "
-              f"fourcc={int(cap.get(cv2.CAP_PROP_FOURCC))}")
-        return cap
-
-
-    def load_and_prepare_calibration(file_path):
-        """
-        Loads stereo parameters (K, D, R, T, Q) from the .pkl file
-        and computes the necessary rectification maps (R1, P1, etc.).
-        """
-        try:
-            with open(file_path, 'rb') as f:
-                data = pickle.load(f)
-
-            # *** Adjusted to match the keys in your stereo_calibration2.pkl file ***
-            K1 = data['cameraMatrix1']
-            D1 = data['distCoeffs1']
-            K2 = data['cameraMatrix2']
-            D2 = data['distCoeffs2']
-            R = data['R']
-            T = data['T']
-            Q = data['Q']  # Q matrix is already computed
-
-        except Exception as e:
-            print(f"Error loading calibration file: {e}")
-            print("Ensure the file exists and the internal keys (cameraMatrix1, R, T, Q etc.) are correct.")
-            return None, None, None, None
-
-        # We need the image shape from the camera, let's open them first to get the size.
-        # cap_test = cv2.VideoCapture(RIGHT, cv2.CAP_V4L2)
-        # cap_test.set(cv2.CAP_PROP_FRAME_WIDTH, DEFAULT_IMG_SIZE[0])
-        # cap_test.set(cv2.CAP_PROP_FRAME_HEIGHT, DEFAULT_IMG_SIZE[1])
-        # ret, frame = cap_test.read()
-        # cap_test.release()
-
-        # if not ret:
-        #    print("Error: Could not read a frame to determine image size.")
-        #    return None, None, None, None
-
-        img_size = DEFAULT_IMG_SIZE  # (width, height)
-        print(f"Using image size: {img_size}")
-
-        # Since your calibration file did not store R1, R2, P1, P2 directly, we re-compute them
-        # using cv2.stereoRectify which only needs K, D, R, T.
-        R1, R2, P1, P2, _, _, _ = cv2.stereoRectify(
-            cameraMatrix1=K1, distCoeffs1=D1,
-            cameraMatrix2=K2, distCoeffs2=D2,
-            imageSize=img_size, R=R, T=T,
-            alpha=-1
-        )
-
-        # Create the Rectification Maps (interpolation maps)
-        map1_l, map2_l = cv2.initUndistortRectifyMap(K1, D1, R1, P1, img_size, cv2.CV_32FC1)
-        map1_r, map2_r = cv2.initUndistortRectifyMap(K2, D2, R2, P2, img_size, cv2.CV_32FC1)
-
-        print("Stereo calibration loaded and rectification maps created successfully.")
-        return (map1_l, map2_l), (map1_r, map2_r), Q, img_size
-
-
-    # --- FUNCTION TO CALCULATE 3D DEPTH ---
-    def calculate_3d_coords(disparity, x, y, Q_matrix):
-        """
-        Computes 3D coordinates (X, Y, Z) from a pixel (x, y) and its disparity value.
-        """
-        # Using the standard Reprojection formula: Q * [x, y, disparity, 1].T
-        # This is a key step in stereo vision for depth estimation.
-        point = np.array([x, y, disparity, 1], dtype=np.float32)
-
-        homogeneous_point = np.dot(Q_matrix, point)
-
-        w = homogeneous_point[3]
-        if w == 0:
-            return (0, 0, 0)
-
-        X = homogeneous_point[0] / w
-        Y = homogeneous_point[1] / w
-        Z = homogeneous_point[2] / w
-
-        return (X, Y, Z)
-
 
     cap_l = open_cam(LEFT, "LEFT")
     cap_r = open_cam(RIGHT, "RIGHT")
