@@ -4,7 +4,7 @@ from typing import Optional
 
 from systems.superstructure import empty_command
 from systems.chassis import States
-from systems.superstructure import Command
+from systems.command import Command
 
 
 class GloveController:

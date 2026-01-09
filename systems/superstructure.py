@@ -8,23 +8,7 @@ from systems import glove
 from systems import gripper
 from systems import ultrasonic
 from systems import keyboard
-
-
-class Command:
-    def __init__(
-            self,
-            _gripper: Optional[int],
-            _arm: Optional[(int, int)],
-            _chassis: chassis.States,
-    ):
-        self.gripper = _gripper
-        self.arm = _arm
-        self.chassis = _chassis
-
-    def set(self, n_command):
-        self.gripper = n_command.gripper
-        self.arm = n_command.arm
-        self.chassis = n_command.chassis
+from systems.command import Command
 
 
 def empty_command() -> Command:
