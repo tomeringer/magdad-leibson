@@ -7,7 +7,7 @@ class Command:
     def __init__(
             self,
             _gripper: Optional[int],
-            _arm: Optional[(int, int)],
+            _arm: Optional[tuple[int, int]],
             _chassis: States,
     ):
         self.gripper = _gripper
