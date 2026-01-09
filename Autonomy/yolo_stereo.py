@@ -219,7 +219,11 @@ if __name__ == '__main__':
         #combined_frame = np.concatenate((annotated_l, annotated_r), axis=1)
 
         t_total = time.perf_counter() - t0
+<<<<<<< HEAD
         metrics.log(t_unix=time.perf_counter(), bottle_x=X, bottle_y=Y, bottle_z=Z, t_proc=t_total)
+=======
+        metrics.log(bottle_x=X, bottle_y=Y, bottle_z=Z, t_proc=t_total)
+>>>>>>> 4c583bb8bf9bd5d70a49e505b9004a0c79983077
 
     # Release resources
     cap_l.release()
