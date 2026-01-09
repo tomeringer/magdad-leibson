@@ -50,7 +50,7 @@ ULTRA_PRINT_PERIOD_SEC = 0.50     # print at 2 Hz
 
 _last_ultra_t = 0.0
 _last_ultra_print_t = 0.0
-_last_distance_cm: Optional[float] = None
+last_distance_cm: Optional[float] = None
 
 # ============================================================
 # SERVO (pigpio)
@@ -246,7 +246,7 @@ def ultrasonic_tick() -> Optional[float]:
     Periodically measures + periodically prints.
     Updates _last_distance_cm and returns it.
     """
-    global _last_ultra_t, _last_ultra_print_t, _last_distance_cm
+    global _last_ultra_t, _last_ultra_print_t, last_distance_cm
 
     now = time.time()
     if not ULTRA_ENABLED:
@@ -267,7 +267,7 @@ def ultrasonic_tick() -> Optional[float]:
 
 
 def ultrasonic_too_close() -> bool:
-    return ULTRA_ENABLED and (_last_distance_cm is not None) and (_last_distance_cm < ULTRA_STOP_CM)
+    return ULTRA_ENABLED and (last_distance_cm is not None) and (last_distance_cm < ULTRA_STOP_CM)
 
 
 # ============================================================
@@ -309,10 +309,10 @@ def read_one_udp_payload(sock) -> Optional[int]:
 # ============================================================
 # PAYLOAD HANDLER
 # ============================================================
-_last_ultra_block_print = 0.0
+last_ultra_block_print = 0.0
 
 def handle_payload(payload: int):
-    global _last_ultra_block_print
+    global last_ultra_block_print
 
     flex = (payload >> 4) & 0x0F
     roll_code = (payload >> 2) & 0x03
@@ -357,7 +357,7 @@ def handle_payload(payload: int):
         now = time.time()
         if now - _last_ultra_block_print > 0.5:
             _last_ultra_block_print = now
-            print(f"[ULTRA] BLOCK DRIVE: {_last_distance_cm:.1f} cm < {ULTRA_STOP_CM:.1f} cm")
+            print(f"[ULTRA] BLOCK DRIVE: {last_distance_cm:.1f} cm < {ULTRA_STOP_CM:.1f} cm")
         return
 
     # Execute DC drive
@@ -478,7 +478,7 @@ def run_keyboard_loop():
             elif c == "w":
                 if ultrasonic_too_close():
                     motor_stop()
-                    print(f"[ULTRA] BLOCK FORWARD: {_last_distance_cm:.1f} cm < {ULTRA_STOP_CM:.1f} cm")
+                    print(f"[ULTRA] BLOCK FORWARD: {last_distance_cm:.1f} cm < {ULTRA_STOP_CM:.1f} cm")
                 else:
                     motor1_forward()
                     motor2_forward()
@@ -492,7 +492,7 @@ def run_keyboard_loop():
             elif c == "a":
                 if ultrasonic_too_close():
                     motor_stop()
-                    print(f"[ULTRA] BLOCK TURN: {_last_distance_cm:.1f} cm < {ULTRA_STOP_CM:.1f} cm")
+                    print(f"[ULTRA] BLOCK TURN: {last_distance_cm:.1f} cm < {ULTRA_STOP_CM:.1f} cm")
                 else:
                     motor1_reverse()
                     motor2_forward()
@@ -501,7 +501,7 @@ def run_keyboard_loop():
             elif c == "d":
                 if ultrasonic_too_close():
                     motor_stop()
-                    print(f"[ULTRA] BLOCK TURN: {_last_distance_cm:.1f} cm < {ULTRA_STOP_CM:.1f} cm")
+                    print(f"[ULTRA] BLOCK TURN: {last_distance_cm:.1f} cm < {ULTRA_STOP_CM:.1f} cm")
                 else:
                     motor1_forward()
                     motor2_reverse()
