@@ -2,7 +2,7 @@ import socket
 import time
 from typing import Optional
 
-from superstructure import empty_command
+from systems.superstructure import empty_command
 from systems.chassis import States
 from systems.superstructure import Command
 
