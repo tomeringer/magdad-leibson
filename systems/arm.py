@@ -43,18 +43,26 @@ class StepperMotor:
             GPIO.output(pin, 0)
 
 
-# Used already: 5,6,12,18,23,24,25
-STEPPER_PINS = [16, 19, 20, 21]  # L298N IN1..IN4
-_stepper = StepperMotor("Stepper(L298N)", STEPPER_PINS)
+class Arm:
+    def __init__(self):
+        # Used already: 5,6,12,18,23,24,25
+        self.STEPPER_PINS = [16, 19, 20, 21]  # L298N IN1..IN4
+        self._stepper = StepperMotor("Stepper(L298N)", self.STEPPER_PINS)
 
-STEPPER_SPEED_SEC = 0.005
-STEPPER_STEP_CHUNK = 50
+        self.STEPPER_SPEED_SEC = 0.005
+        self.STEPPER_STEP_CHUNK = 50
 
+    def stepper_move(self, steps: int, direction: int):
+        """
+        direction: 1 = forward, 0 = reverse
+        steps: number of step-cycles
+        """
+        if steps is None or direction is None:
+            self.stop()
+            return
 
-def stepper_move(steps: int, direction: int):
-    """
-    direction: 1 = forward, 0 = reverse
-    steps: number of step-cycles
-    """
-    dir_pm = 1 if direction else -1
-    _stepper.move(int(abs(steps)), direction=dir_pm, speed=STEPPER_SPEED_SEC)
+        dir_pm = 1 if direction else -1
+        self._stepper.move(int(abs(steps)), direction=dir_pm, speed=self.STEPPER_SPEED_SEC)
+
+    def stop(self):
+        self._stepper.stop()

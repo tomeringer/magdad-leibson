@@ -7,40 +7,47 @@ try:
 except ImportError:
     pigpio = None
 
-_pi = None
 
+class Gripper:
+    def __init__(self):
+        self.SERVO_PIN = SERVO_PIN
+        self.SERVO_NEUTRAL_US = SERVO_NEUTRAL_US
+        self.SERVO_SPIN_DELTA_US = SERVO_SPIN_DELTA_US
 
-def servo_init():
-    global _pi
-    if pigpio is None:
-        print("WARNING: pigpio not installed")
-        return
-    _pi = pigpio.pi()
-    if not _pi.connected:
-        print("WARNING: pigpio daemon not running (sudo systemctl enable --now pigpiod)")
-        _pi = None
-        return
-    _pi.set_servo_pulsewidth(SERVO_PIN, SERVO_NEUTRAL_US)
+        self.pigpio = pigpio
+        self._pi = None
 
+    def servo_init(self):
+        if self.pigpio is None:
+            print("WARNING: pigpio not installed")
+            return
+        self._pi = self.pigpio.pi()
+        if not self._pi.connected:
+            print("WARNING: pigpio daemon not running (sudo systemctl enable --now pigpiod)")
+            self._pi = None
+            return
+        self._pi.set_servo_pulsewidth(self.SERVO_PIN, self.SERVO_NEUTRAL_US)
 
-def servo_stop():
-    if _pi:
-        _pi.set_servo_pulsewidth(SERVO_PIN, SERVO_NEUTRAL_US)
+    def servo_stop(self):
+        if self._pi:
+            self._pi.set_servo_pulsewidth(self.SERVO_PIN, self.SERVO_NEUTRAL_US)
 
+    def servo_spin(self, direction_bit: int):
+        """
+        direction_bit: 1 or 0 (chooses pulsewidth above/below neutral)
+        """
+        if self._pi is None:
+            self.servo_stop()
+            return
+        pw = (
+            self.SERVO_NEUTRAL_US + self.SERVO_SPIN_DELTA_US
+            if direction_bit
+            else self.SERVO_NEUTRAL_US - self.SERVO_SPIN_DELTA_US
+        )
+        self._pi.set_servo_pulsewidth(self.SERVO_PIN, pw)
 
-def servo_spin(direction_bit: int):
-    """
-    direction_bit: 1 or 0 (chooses pulsewidth above/below neutral)
-    """
-    if _pi is None:
-        return
-    pw = SERVO_NEUTRAL_US + SERVO_SPIN_DELTA_US if direction_bit else SERVO_NEUTRAL_US - SERVO_SPIN_DELTA_US
-    _pi.set_servo_pulsewidth(SERVO_PIN, pw)
-
-
-def servo_cleanup():
-    global _pi
-    if _pi:
-        servo_stop()
-        _pi.stop()
-        _pi = None
+    def servo_cleanup(self):
+        if self._pi:
+            self.servo_stop()
+            self._pi.stop()
+            self._pi = None

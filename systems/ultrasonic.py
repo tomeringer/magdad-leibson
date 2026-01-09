@@ -4,73 +4,75 @@ from typing import Optional
 import RPi.GPIO as GPIO
 
 
-# ============================================================
-# ULTRASONIC
-# ============================================================
-TRIG = 5
-ECHO = 6
-GPIO.setup(TRIG, GPIO.OUT)
-GPIO.setup(ECHO, GPIO.IN)
+class Ultrasonic:
+    def __init__(self):
+        # ============================================================
+        # ULTRASONIC
+        # ============================================================
+        self.TRIG = 5
+        self.ECHO = 6
+        GPIO.setup(self.TRIG, GPIO.OUT)
+        GPIO.setup(self.ECHO, GPIO.IN)
 
-ULTRA_ENABLED = True
-ULTRA_STOP_CM = 40.0
+        self.ULTRA_ENABLED = True
+        self.ULTRA_STOP_CM = 40.0
 
-ULTRA_MEASURE_PERIOD_SEC = 0.10   # measure at 10 Hz
-ULTRA_PRINT_PERIOD_SEC = 0.50     # print at 2 Hz
+        self.ULTRA_MEASURE_PERIOD_SEC = 0.10  # measure at 10 Hz
+        self.ULTRA_PRINT_PERIOD_SEC = 0.50  # print at 2 Hz
 
-_last_ultra_t = 0.0
-_last_ultra_print_t = 0.0
-last_distance_cm: Optional[float] = None
+        self._last_ultra_t = 0.0
+        self._last_ultra_print_t = 0.0
+        self.last_distance_cm: Optional[float] = None
 
-def measure_distance_cm() -> Optional[float]:
-    """
-    Returns distance in cm or None on timeout.
-    """
-    GPIO.output(TRIG, False)
-    time.sleep(0.0002)
+    def measure_distance_cm(self) -> Optional[float]:
+        """
+        Returns distance in cm or None on timeout.
+        """
+        GPIO.output(self.TRIG, False)
+        time.sleep(0.0002)
 
-    GPIO.output(TRIG, True)
-    time.sleep(0.00001)
-    GPIO.output(TRIG, False)
+        GPIO.output(self.TRIG, True)
+        time.sleep(0.00001)
+        GPIO.output(self.TRIG, False)
 
-    t0 = time.time()
-    while GPIO.input(ECHO) == 0:
-        if time.time() - t0 > 0.03:
-            return None
+        t0 = time.time()
+        while GPIO.input(self.ECHO) == 0:
+            if time.time() - t0 > 0.03:
+                return None
 
-    pulse_start = time.time()
-    while GPIO.input(ECHO) == 1:
-        if time.time() - pulse_start > 0.03:
-            return None
+        pulse_start = time.time()
+        while GPIO.input(self.ECHO) == 1:
+            if time.time() - pulse_start > 0.03:
+                return None
 
-    pulse_end = time.time()
-    return (pulse_end - pulse_start) * 17150.0
+        pulse_end = time.time()
+        return (pulse_end - pulse_start) * 17150.0
 
+    def tick(self) -> Optional[float]:
+        """
+        Periodically measures + periodically prints.
+        Updates last_distance_cm and returns it.
+        """
+        now = time.time()
+        if not self.ULTRA_ENABLED:
+            return self.last_distance_cm
 
-def tick() -> Optional[float]:
-    """
-    Periodically measures + periodically prints.
-    Updates _last_distance_cm and returns it.
-    """
-    global _last_ultra_t, _last_ultra_print_t, last_distance_cm
+        if now - self._last_ultra_t >= self.ULTRA_MEASURE_PERIOD_SEC:
+            self._last_ultra_t = now
+            self.last_distance_cm = self.measure_distance_cm()
 
-    now = time.time()
-    if not ULTRA_ENABLED:
-        return last_distance_cm
+        if now - self._last_ultra_print_t >= self.ULTRA_PRINT_PERIOD_SEC:
+            self._last_ultra_print_t = now
+            if self.last_distance_cm is None:
+                print("[ULTRA] dist=None (timeout)")
+            else:
+                print(f"[ULTRA] dist={self.last_distance_cm:.1f} cm")
 
-    if now - _last_ultra_t >= ULTRA_MEASURE_PERIOD_SEC:
-        _last_ultra_t = now
-        last_distance_cm = measure_distance_cm()
+        return self.last_distance_cm
 
-    if now - _last_ultra_print_t >= ULTRA_PRINT_PERIOD_SEC:
-        _last_ultra_print_t = now
-        if last_distance_cm is None:
-            print("[ULTRA] dist=None (timeout)")
-        else:
-            print(f"[ULTRA] dist={last_distance_cm:.1f} cm")
-
-    return last_distance_cm
-
-
-def too_close() -> bool:
-    return ULTRA_ENABLED and (last_distance_cm is not None) and (last_distance_cm < ULTRA_STOP_CM)
+    def too_close(self) -> bool:
+        return (
+                self.ULTRA_ENABLED
+                and (self.last_distance_cm is not None)
+                and (self.last_distance_cm < self.ULTRA_STOP_CM)
+        )
