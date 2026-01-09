@@ -1,5 +1,5 @@
 from systems.chassis import States
-from systems.superstructure import empty_command
+from systems.command import empty_command
 
 
 class KeyboardController:
