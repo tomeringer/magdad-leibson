@@ -7,7 +7,7 @@ class CSVMetricLogger:
         new_file = not os.path.exists(path)
 
         self.f = open(path, "a", newline="")
-        self.w = csv.DictWriter(self.f, fieldnames=fieldnames)
+        self.w = csv.DictWriter(self.f, fieldnames=fieldnames, extrasaction="ignore")
         if new_file:
             self.w.writeheader()
 

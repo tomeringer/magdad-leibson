@@ -1,7 +1,6 @@
 import pickle
 import time
 from datetime import datetime
-import sys
 
 import cv2
 import numpy as np
@@ -12,10 +11,7 @@ import lib_logger
 
 # --- FUNCTION TO LOAD AND PREPARE CALIBRATION DATA ---
 def open_cam(path: str, name: str):
-    if windows:
-        cap = cv2.VideoCapture(path)
-    else:
-        cap = cv2.VideoCapture(path, cv2.CAP_V4L2)
+    cap = cv2.VideoCapture(path, cv2.CAP_V4L2)
     print(f"{name}: opening {path}  isOpened={cap.isOpened()}")
     if not cap.isOpened():
         return cap
@@ -121,20 +117,15 @@ if __name__ == '__main__':
     ts = datetime.now().strftime("%Y%m%d_%H%M")
     metrics = lib_logger.CSVMetricLogger(
         f"cam_logs/log{ts}.csv",
-        fieldnames=["t", "bottle_x", "bottle_y", "bottle_z", "t_proc"]
+        fieldnames=["t_unix", "bottle_x", "bottle_y", "bottle_z", "t_proc"]
     )
 
     # Path to your generated stereo calibration file
     CALIBRATION_FILE_PATH = r"stereo_calibration.pkl"
 
     # Indices of your USB cameras (must match the cameras used for calibration)
-    windows = (sys.platform == "win32")
-    if windows:
-        LEFT = 1
-        RIGHT = 0
-    else:
-        LEFT = "/dev/v4l/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.4:1.0-video-index0"
-        RIGHT = "/dev/v4l/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0"
+    LEFT = "/dev/v4l/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.4:1.0-video-index0"
+    RIGHT = "/dev/v4l/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0"
 
     # Image size (Assuming 640x480 as in the previous example,
     # but this should match the size used during calibration!)
@@ -146,8 +137,9 @@ if __name__ == '__main__':
 
     # Load the YOLOv8 model (YOLOv8n for fast inference)
     # This step takes the most time during startup.
-    model = YOLO('yolov8n.pt')
-
+    # model = YOLO('yolov8n.pt')  
+    model = YOLO('yolov8n_ncnn_model', task='detect')  # Use the NCNN exported model for better performance on Pi    
+    
     # COCO dataset class ID for 'bottle'
     BOTTLE_CLASS_ID = 39
 
@@ -227,7 +219,7 @@ if __name__ == '__main__':
         #combined_frame = np.concatenate((annotated_l, annotated_r), axis=1)
 
         t_total = time.perf_counter() - t0
-        metrics.log(t=time.perf_counter(), bottle_x=X, bottle_y=Y, bottle_z=Z, t_proc=t_total)
+        metrics.log(t_unix=time.perf_counter(), bottle_x=X, bottle_y=Y, bottle_z=Z, t_proc=t_total)
 
     # Release resources
     cap_l.release()
