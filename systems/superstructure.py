@@ -9,10 +9,7 @@ from systems import gripper
 from systems import ultrasonic
 from systems import keyboard
 from systems.command import Command
-
-
-def empty_command() -> Command:
-    return Command(None, None, chassis.States.STOP)
+from systems.command import empty_command
 
 
 class Mode(Enum):
