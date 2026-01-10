@@ -1,78 +1,78 @@
 import time
-from typing import Optional
-
 import RPi.GPIO as GPIO
 
 
 class Ultrasonic:
     def __init__(self):
-        # ============================================================
-        # ULTRASONIC
-        # ============================================================
-        self.TRIG = 13
-        self.ECHO = 19
-        GPIO.setup(self.TRIG, GPIO.OUT)
-        GPIO.setup(self.ECHO, GPIO.IN)
+        # Ultrasonic 1
+        self.TRIG_1 = 5
+        self.ECHO_1 = 6
 
-        self.ULTRA_ENABLED = True
-        self.ULTRA_STOP_CM = 40.0
+        # Ultrasonic 2
+        self.TRIG_2 = 13
+        self.ECHO_2 = 19
 
-        self.ULTRA_MEASURE_PERIOD_SEC = 0.10  # measure at 10 Hz
-        self.ULTRA_PRINT_PERIOD_SEC = 0.50  # print at 2 Hz
+        # ================= CONSTANT =================
+        self.BASELINE_D = 37.5  # cm
+        self.MINIMAL_D = 50     # cm
+        self.TIME_SLEEP = 0.06
 
-        self._last_ultra_t = 0.0
-        self._last_ultra_print_t = 0.0
-        self.last_distance_cm: Optional[float] = None
+        # GPIO setup
+        GPIO.setup(self.TRIG_1, GPIO.OUT)
+        GPIO.setup(self.ECHO_1, GPIO.IN)
+        GPIO.setup(self.TRIG_2, GPIO.OUT)
+        GPIO.setup(self.ECHO_2, GPIO.IN)
 
-    def measure_distance_cm(self) -> Optional[float]:
-        """
-        Returns distance in cm or None on timeout.
-        """
-        GPIO.output(self.TRIG, False)
-        time.sleep(0.0002)
+        GPIO.output(self.TRIG_1, False)
+        GPIO.output(self.TRIG_2, False)
 
-        GPIO.output(self.TRIG, True)
+        self.drive = True
+
+    # ================= MEASUREMENT =================
+    def measure_distance(self, trig, echo, timeout=0.02):
+        GPIO.output(trig, True)
         time.sleep(0.00001)
-        GPIO.output(self.TRIG, False)
+        GPIO.output(trig, False)
 
-        t0 = time.time()
-        while GPIO.input(self.ECHO) == 0:
-            if time.time() - t0 > 0.03:
+        start_time = time.time()
+
+        while GPIO.input(echo) == 0:
+            if time.time() - start_time > timeout:
                 return None
-
         pulse_start = time.time()
-        while GPIO.input(self.ECHO) == 1:
-            if time.time() - pulse_start > 0.03:
+
+        while GPIO.input(echo) == 1:
+            if time.time() - pulse_start > timeout:
                 return None
-
         pulse_end = time.time()
-        return (pulse_end - pulse_start) * 17150.0
 
-    def tick(self) -> Optional[float]:
-        """
-        Periodically measures + periodically prints.
-        Updates last_distance_cm and returns it.
-        """
-        now = time.time()
-        if not self.ULTRA_ENABLED:
-            return self.last_distance_cm
+        duration = pulse_end - pulse_start
+        return (duration * 34300) / 2  # cm
 
-        if now - self._last_ultra_t >= self.ULTRA_MEASURE_PERIOD_SEC:
-            self._last_ultra_t = now
-            self.last_distance_cm = self.measure_distance_cm()
+    # ================= DRIVING CONDITION =================
+    def can_drive(self, l1, l2):
+        if l1 < self.MINIMAL_D or l2 < self.MINIMAL_D:
+            return False
+        return True
 
-        if now - self._last_ultra_print_t >= self.ULTRA_PRINT_PERIOD_SEC:
-            self._last_ultra_print_t = now
-            if self.last_distance_cm is None:
-                print("[ULTRA] dist=None (timeout)")
-            else:
-                print(f"[ULTRA] dist={self.last_distance_cm:.1f} cm")
+    # ================= MAIN LOOP =================
+    def tick(self):
+        try:
+            l1 = self.measure_distance(self.TRIG_1, self.ECHO_1)
+            time.sleep(self.TIME_SLEEP)
+            l2 = self.measure_distance(self.TRIG_2, self.ECHO_2)
 
-        return self.last_distance_cm
+            self.drive = True
+            if l1 is not None and l2 is not None:
+                self.drive = self.can_drive(l1, l2)
 
-    def too_close(self) -> bool:
-        return (
-                self.ULTRA_ENABLED
-                and (self.last_distance_cm is not None)
-                and (self.last_distance_cm < self.ULTRA_STOP_CM)
-        )
+            # -------- Pretty printing --------
+            print("===================================")
+            print(f"US1 distance: {l1:6.1f} cm" if l1 else "US1 distance: timeout")
+            print(f"US2 distance: {l2:6.1f} cm" if l2 else "US2 distance: timeout")
+            print("DRIVE:", "YES" if self.drive else "NO")
+            print("===================================\n")
+
+        except KeyboardInterrupt:
+            print("\nStopping...")
+            GPIO.cleanup()
