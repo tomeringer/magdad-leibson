@@ -9,8 +9,8 @@ class Ultrasonic:
         # ============================================================
         # ULTRASONIC
         # ============================================================
-        self.TRIG = 5
-        self.ECHO = 6
+        self.TRIG = 13
+        self.ECHO = 19
         GPIO.setup(self.TRIG, GPIO.OUT)
         GPIO.setup(self.ECHO, GPIO.IN)
 

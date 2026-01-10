@@ -46,7 +46,7 @@ class StepperMotor:
 class Arm:
     def __init__(self):
         # Used already: 5,6,12,18,23,24,25
-        self.STEPPER_PINS = [16, 19, 20, 21]  # L298N IN1..IN4
+        self.STEPPER_PINS = [23, 22, 27, 17]  # L298N IN1..IN4
         self._stepper = StepperMotor("Stepper(L298N)", self.STEPPER_PINS)
 
         self.STEPPER_SPEED_SEC = 0.005
