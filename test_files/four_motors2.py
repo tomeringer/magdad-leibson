@@ -121,8 +121,8 @@ M2_RPWM = PWMOutputDevice(14, frequency=PWM_HZ, initial_value=0)
 M2_LPWM = PWMOutputDevice(15, frequency=PWM_HZ, initial_value=0)
 
 # Tune this to remove drift (left motor slower => < 1.0)
-M1_SCALE = 1.00
-M2_SCALE = 0.90
+M1_SCALE = 0.50
+M2_SCALE = 0.5075
 
 
 def _clamp01(x: float) -> float:
