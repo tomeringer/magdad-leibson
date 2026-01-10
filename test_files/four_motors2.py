@@ -121,8 +121,8 @@ LEFT_RPWM = PWMOutputDevice(20, frequency=PWM_HZ, initial_value=0)
 LEFT_LPWM = PWMOutputDevice(21, frequency=PWM_HZ, initial_value=0)
 
 # Tune these if you want drift compensation
-RIGHT_SCALE = 0.50
-LEFT_SCALE = 0.5075
+RIGHT_SCALE = 0.51
+LEFT_SCALE = 0.50
 
 
 def _clamp01(x: float) -> float:
