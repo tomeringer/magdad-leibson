@@ -20,7 +20,7 @@ class Chassis:
 
         # Tune this to remove drift (left motor slower => < 1.0)
         self.M1_SCALE = 1.00
-        self.M2_SCALE = 0.95
+        self.M2_SCALE = 0.97
 
     def _clamp01(self, x: float) -> float:
         return 0.0 if x < 0.0 else (1.0 if x > 1.0 else x)
