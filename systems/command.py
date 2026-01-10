@@ -22,6 +22,12 @@ class Command:
     def equal(self, other):
         return self.gripper == other.gripper and self.arm == other.arm and self.chassis == other.chassis
 
+    def print(self):
+        print("Gipper command: " + str(self.gripper))
+        print("Arm command: " + str(self.arm))
+        print("Chassis command: " + str(self.chassis))
+
+
 
 def empty_command() -> Command:
     return Command(None, None, States.STOP)
