@@ -1,8 +1,10 @@
-from systems import superstructure
-from systems.superstructure import Superstructure
 import RPi.GPIO as GPIO
 
+from systems import superstructure
+from systems.superstructure import Superstructure
+
 MODE = superstructure.Mode.KEYBOARD
+
 
 def main():
     super = Superstructure(MODE)

@@ -1,13 +1,12 @@
 import time
 from enum import Enum
-from typing import Optional
 
 from systems import arm
 from systems import chassis
 from systems import glove
 from systems import gripper
-from systems import ultrasonic
 from systems import keyboard
+from systems import ultrasonic
 from systems.command import Command
 from systems.command import empty_command
 
@@ -86,4 +85,3 @@ class Superstructure:
         self.stop()
         self.gripper.servo_cleanup()
         self.glove.stop()
-

@@ -19,5 +19,6 @@ class Command:
         self.arm = n_command.arm
         self.chassis = n_command.chassis
 
+
 def empty_command() -> Command:
     return Command(None, None, States.STOP)
