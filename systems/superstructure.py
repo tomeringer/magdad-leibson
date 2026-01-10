@@ -79,7 +79,7 @@ class Superstructure:
 
             if not self.command.equal(self.last_command):
                 self.gripper.servo_spin(self.command.gripper)
-                self.arm.stepper_move(self.command.arm)
+                self.arm.stepper_move(self.arm.STEPPER_STEP_CHUNK, self.command.arm)
                 self.chassis.run_desired(self.command.chassis)
 
 
