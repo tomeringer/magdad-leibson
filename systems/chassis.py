@@ -19,8 +19,8 @@ class Chassis:
         self.M2_LPWM = PWMOutputDevice(3, frequency=self.PWM_HZ, initial_value=0)
 
         # Tune this to remove drift (left motor slower => < 1.0)
-        self.M1_SCALE = 1.00
-        self.M2_SCALE = 0.97
+        self.M1_SCALE = 0.50
+        self.M2_SCALE = 0.49
 
     def _clamp01(self, x: float) -> float:
         return 0.0 if x < 0.0 else (1.0 if x > 1.0 else x)
