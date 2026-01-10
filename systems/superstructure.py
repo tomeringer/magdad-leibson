@@ -21,7 +21,6 @@ class Superstructure:
         self.mode = mode
 
         self.gripper = gripper.Gripper()
-        self.gripper.servo_init()
         self.arm = arm.Arm()
         self.chassis = chassis.Chassis()
 
@@ -37,21 +36,12 @@ class Superstructure:
     def set_command(self, n_command: Command):
         # Ultrasonic safety:
         # If too close (<40cm), BLOCK forward/turn, but allow reverse to back away.
-        if self.ultrasonic.too_close() and n_command.chassis in (
+        if self.ultrasonic.drive and n_command.chassis in (
                 chassis.States.FORWARD,
                 chassis.States.TURN_LEFT,
                 chassis.States.TURN_RIGHT,
         ):
             n_command.chassis = chassis.States.STOP
-            now = time.time()
-            if now - self.glove.last_ultra_block_print > 0.5:
-                self.glove.last_ultra_block_print = now
-                print(
-                    f"[ULTRA] BLOCK DRIVE: "
-                    f"{self.ultrasonic.last_distance_cm:.1f} cm "
-                    f"< {self.ultrasonic.ULTRA_STOP_CM:.1f} cm"
-                )
-            return
 
         self.command.set(n_command=n_command)
 
