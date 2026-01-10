@@ -30,6 +30,7 @@ class Superstructure:
         self.keyboard = keyboard.KeyboardController()
 
         self.command = empty_command()
+        self.last_command = empty_command()
 
         self.CONTROL_PERIOD_SEC = 0.01
 
@@ -62,17 +63,25 @@ class Superstructure:
             print("Commands: w/s/a/d (drive), x (stop), i/k (servo), o (servo stop), u/j (stepper), q (quit)")
 
     def tick(self):
+        self.last_command.set(self.command)
         self.ultrasonic.tick()
         if self.mode == Mode.GLOVE:
             self.glove.tick()
             self.set_command(self.glove.command)
+
+            self.gripper.servo_spin(self.command.gripper)
+            self.arm.stepper_move(self.command.arm)
+            self.chassis.run_desired(self.command.chassis)
+
         else:
             self.keyboard.tick()
             self.set_command(self.keyboard.command)
 
-        self.gripper.servo_spin(self.command.gripper)
-        self.arm.stepper_move(self.command.arm)
-        self.chassis.run_desired(self.command.chassis)
+            if not self.command.equal(self.last_command):
+                self.gripper.servo_spin(self.command.gripper)
+                self.arm.stepper_move(self.command.arm)
+                self.chassis.run_desired(self.command.chassis)
+
 
         time.sleep(self.CONTROL_PERIOD_SEC)
 
