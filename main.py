@@ -7,15 +7,20 @@ MODE = superstructure.Mode.KEYBOARD
 
 
 def main():
-    _super = Superstructure(MODE)
+    GPIO.setwarnings(False)
+    GPIO.setmode(GPIO.BCM)
 
+    _super = None
     try:
+        _super = Superstructure(MODE)
         _super.start()
         while True:
             _super.tick()
     finally:
-        _super.end()
+        if _super is not None:
+            _super.end()
         GPIO.cleanup()
+
 
 
 if __name__ == "__main__":

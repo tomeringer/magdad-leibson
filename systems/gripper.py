@@ -36,7 +36,7 @@ class Gripper:
         """
         direction_bit: 1 or 0 (chooses pulsewidth above/below neutral)
         """
-        if self._pi is None:
+        if self._pi is None or direction_bit is None:
             self.servo_stop()
             return
         pw = (
