@@ -21,7 +21,6 @@ class Superstructure:
         self.mode = mode
 
         self.gripper = gripper.Gripper()
-        self.gripper.servo_init()
         self.arm = arm.Arm()
         self.chassis = chassis.Chassis()
 
