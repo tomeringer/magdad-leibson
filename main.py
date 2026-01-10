@@ -7,14 +7,14 @@ MODE = superstructure.Mode.KEYBOARD
 
 
 def main():
-    super = Superstructure(MODE)
+    _super = Superstructure(MODE)
 
     try:
-        super.start()
+        _super.start()
         while True:
-            super.tick()
+            _super.tick()
     finally:
-        super.end()
+        _super.end()
         GPIO.cleanup()
 
 
