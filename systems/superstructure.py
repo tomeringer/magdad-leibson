@@ -53,7 +53,7 @@ class Superstructure:
                 )
             return
 
-        self.command = n_command
+        self.command.set(n_command=n_command)
 
     def start(self):
         if self.mode == Mode.GLOVE:
@@ -72,7 +72,7 @@ class Superstructure:
             self.set_command(self.keyboard.command)
 
         self.gripper.servo_spin(self.command.gripper)
-        self.arm.stepper_move(self.command.arm[0], self.command.arm[1])
+        self.arm.stepper_move(self.command.arm)
         self.chassis.run_desired(self.command.chassis)
 
         time.sleep(self.CONTROL_PERIOD_SEC)

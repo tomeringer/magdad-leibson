@@ -52,17 +52,17 @@ class Arm:
         self.STEPPER_SPEED_SEC = 0.005
         self.STEPPER_STEP_CHUNK = 50
 
-    def stepper_move(self, steps: int, direction: int):
+    def stepper_move(self, direction: int):
         """
         direction: 1 = forward, 0 = reverse
         steps: number of step-cycles
         """
-        if steps is None or direction is None:
+        if direction is None:
             self.stop()
             return
 
         dir_pm = 1 if direction else -1
-        self._stepper.move(int(abs(steps)), direction=dir_pm, speed=self.STEPPER_SPEED_SEC)
+        self._stepper.move(int(abs(self.STEPPER_STEP_CHUNK)), direction=dir_pm, speed=self.STEPPER_SPEED_SEC)
 
     def stop(self):
         self._stepper.stop()
