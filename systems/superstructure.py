@@ -59,12 +59,15 @@ class Superstructure:
             self.glove.tick()
             self.set_command(self.glove.command)
 
-            if self.command.gripper:
-                self.gripper.open_servo()
-            else:
-                self.gripper.close_servo()
-            self.arm.stepper_move(self.arm.STEPPER_STEP_CHUNK, self.command.arm)
-            self.chassis.run_desired(self.command.chassis)
+            if not self.command.equal(self.last_command):
+                self.set_command(self.keyboard.command)
+
+                if self.command.gripper:
+                    self.gripper.open_servo()
+                else:
+                    self.gripper.close_servo()
+                self.arm.stepper_move(self.arm.STEPPER_STEP_CHUNK, self.command.arm)
+                self.chassis.run_desired(self.command.chassis)
 
         else:
             self.keyboard.tick()
