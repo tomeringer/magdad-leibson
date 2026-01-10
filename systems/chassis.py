@@ -12,10 +12,10 @@ class Chassis:
 
         # M1 (right motor in your current mapping)
         self.M1_RPWM = PWMOutputDevice(2, frequency=self.PWM_HZ, initial_value=0)
-        self.M2_RPWM = PWMOutputDevice(3, frequency=self.PWM_HZ, initial_value=0)
+        self.M1_LPWM = PWMOutputDevice(3, frequency=self.PWM_HZ, initial_value=0)
 
         # M2 (LEFT motor: physical pins 18+22 -> BCM 24+25)
-        self.M1_LPWM = PWMOutputDevice(20, frequency=self.PWM_HZ, initial_value=0)
+        self.M2_RPWM = PWMOutputDevice(20, frequency=self.PWM_HZ, initial_value=0)
         self.M2_LPWM = PWMOutputDevice(21, frequency=self.PWM_HZ, initial_value=0)
 
         # Tune this to remove drift (left motor slower => < 1.0)
