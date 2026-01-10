@@ -79,6 +79,7 @@ class Superstructure:
                 self.arm.stepper_move(self.arm.STEPPER_STEP_CHUNK, self.command.arm)
                 self.chassis.run_desired(self.command.chassis)
 
+        self.command.print()
 
         time.sleep(self.CONTROL_PERIOD_SEC)
 
