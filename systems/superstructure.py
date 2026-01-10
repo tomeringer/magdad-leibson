@@ -69,8 +69,11 @@ class Superstructure:
             self.glove.tick()
             self.set_command(self.glove.command)
 
-            self.gripper.servo_spin(self.command.gripper)
-            self.arm.stepper_move(self.command.arm)
+            if self.command.gripper:
+                self.gripper.open_servo()
+            else:
+                self.gripper.close_servo()
+            self.arm.stepper_move(self.arm.STEPPER_STEP_CHUNK, self.command.arm)
             self.chassis.run_desired(self.command.chassis)
 
         else:
@@ -78,7 +81,10 @@ class Superstructure:
             self.set_command(self.keyboard.command)
 
             if not self.command.equal(self.last_command):
-                self.gripper.servo_spin(self.command.gripper)
+                if self.command.gripper:
+                    self.gripper.open_servo()
+                else:
+                    self.gripper.close_servo()
                 self.arm.stepper_move(self.arm.STEPPER_STEP_CHUNK, self.command.arm)
                 self.chassis.run_desired(self.command.chassis)
 
@@ -86,11 +92,10 @@ class Superstructure:
         time.sleep(self.CONTROL_PERIOD_SEC)
 
     def stop(self):
-        self.gripper.servo_stop()
-        self.arm.stop()
+        self.gripper.stop_servo()
+        self.arm.stepper_release()
         self.chassis.motor_stop()
 
     def end(self):
         self.stop()
-        self.gripper.servo_cleanup()
         self.glove.stop()

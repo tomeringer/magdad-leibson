@@ -1,53 +1,48 @@
-SERVO_PIN = 12
-SERVO_NEUTRAL_US = 1500
-SERVO_SPIN_DELTA_US = 200
-
-try:
-    import pigpio
-except ImportError:
-    pigpio = None
+from gpiozero import Servo
+from gpiozero.pins.pigpio import PiGPIOFactory
 
 
 class Gripper:
-    def __init__(self):
-        self.SERVO_PIN = SERVO_PIN
-        self.SERVO_NEUTRAL_US = SERVO_NEUTRAL_US
-        self.SERVO_SPIN_DELTA_US = SERVO_SPIN_DELTA_US
+    def __init__(
+        self,
+        servo_pin: int = 18,
+        move_step: float = 0.39,   # ~70 degrees for 360 servo
+        zero_pos: float = -0.95,  # calibrated physical zero
+    ):
+        # --- Hardware & calibration ---
+        self.SERVO_PIN = servo_pin
+        self.MOVE_STEP = move_step
+        self.MY_ZERO = zero_pos
 
-        self.pigpio = pigpio
-        self._pi = None
-
-    def servo_init(self):
-        if self.pigpio is None:
-            print("WARNING: pigpio not installed")
-            return
-        self._pi = self.pigpio.pi()
-        if not self._pi.connected:
-            print("WARNING: pigpio daemon not running (sudo systemctl enable --now pigpiod)")
-            self._pi = None
-            return
-        self._pi.set_servo_pulsewidth(self.SERVO_PIN, self.SERVO_NEUTRAL_US)
-
-    def servo_stop(self):
-        if self._pi:
-            self._pi.set_servo_pulsewidth(self.SERVO_PIN, self.SERVO_NEUTRAL_US)
-
-    def servo_spin(self, direction_bit: int):
-        """
-        direction_bit: 1 or 0 (chooses pulsewidth above/below neutral)
-        """
-        if self._pi is None or direction_bit is None:
-            self.servo_stop()
-            return
-        pw = (
-            self.SERVO_NEUTRAL_US + self.SERVO_SPIN_DELTA_US
-            if direction_bit
-            else self.SERVO_NEUTRAL_US - self.SERVO_SPIN_DELTA_US
+        self.factory = PiGPIOFactory()
+        self.servo = Servo(
+            self.SERVO_PIN,
+            initial_value=None,
+            min_pulse_width=0.5 / 1000,
+            max_pulse_width=2.5 / 1000,
+            pin_factory=self.factory,
         )
-        self._pi.set_servo_pulsewidth(self.SERVO_PIN, pw)
 
-    def servo_cleanup(self):
-        if self._pi:
-            self.servo_stop()
-            self._pi.stop()
-            self._pi = None
+        self.current_pos = self.MY_ZERO
+
+    def open_servo(self):
+        """מבצע תנועת פתיחה של ~70 מעלות"""
+        new_val = self.current_pos + self.MOVE_STEP
+        if new_val > 1.0:
+            new_val = 1.0
+
+        self.current_pos = new_val
+        self.servo.value = self.current_pos
+
+    def close_servo(self):
+        """מבצע תנועת סגירה של ~70 מעלות"""
+        new_val = self.current_pos - self.MOVE_STEP
+        if new_val < -1.0:
+            new_val = -1.0
+
+        self.current_pos = new_val
+        self.servo.value = self.current_pos
+
+    def stop_servo(self):
+        """משחרר את המנוע (מומלץ לקרוא לזה בסיום התוכנית הכללית)"""
+        self.servo.detach()
