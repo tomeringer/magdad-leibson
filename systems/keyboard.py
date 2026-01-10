@@ -15,6 +15,7 @@ class KeyboardController:
             c = cmd[0]
 
             if c == "x":
+                self.command = empty_command()
                 print("[KEYBOARD] stop all")
 
             # DC motors
@@ -49,6 +50,9 @@ class KeyboardController:
             elif c == "j":
                 self.command.arm = 0
                 print("[KEYBOARD] stepper reverse")
+
+            elif c == "q":
+                raise SystemExit
             else:
                 print("[KEYBOARD] unknown command")
 

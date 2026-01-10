@@ -11,16 +11,16 @@ class Chassis:
         self.PWM_HZ = 1000
 
         # M1 (right motor in your current mapping)
-        self.M1_RPWM = PWMOutputDevice(18, frequency=self.PWM_HZ, initial_value=0)
-        self.M1_LPWM = PWMOutputDevice(23, frequency=self.PWM_HZ, initial_value=0)
+        self.M1_RPWM = PWMOutputDevice(20, frequency=self.PWM_HZ, initial_value=0)
+        self.M1_LPWM = PWMOutputDevice(21, frequency=self.PWM_HZ, initial_value=0)
 
         # M2 (LEFT motor: physical pins 18+22 -> BCM 24+25)
-        self.M2_RPWM = PWMOutputDevice(24, frequency=self.PWM_HZ, initial_value=0)
-        self.M2_LPWM = PWMOutputDevice(25, frequency=self.PWM_HZ, initial_value=0)
+        self.M2_RPWM = PWMOutputDevice(2, frequency=self.PWM_HZ, initial_value=0)
+        self.M2_LPWM = PWMOutputDevice(3, frequency=self.PWM_HZ, initial_value=0)
 
         # Tune this to remove drift (left motor slower => < 1.0)
         self.M1_SCALE = 1.00
-        self.M2_SCALE = 0.90
+        self.M2_SCALE = 0.95
 
     def _clamp01(self, x: float) -> float:
         return 0.0 if x < 0.0 else (1.0 if x > 1.0 else x)

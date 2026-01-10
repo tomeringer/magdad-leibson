@@ -19,5 +19,9 @@ class Command:
         self.arm = n_command.arm
         self.chassis = n_command.chassis
 
+    def equal(self, other):
+        return self.gripper == other.gripper and self.arm == other.arm and self.chassis == other.chassis
+
+
 def empty_command() -> Command:
     return Command(None, None, States.STOP)

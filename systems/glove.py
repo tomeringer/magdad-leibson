@@ -2,9 +2,9 @@ import socket
 import time
 from typing import Optional
 
-from systems.command import empty_command
 from systems.chassis import States
 from systems.command import Command
+from systems.command import empty_command
 
 
 class GloveController:
@@ -108,8 +108,6 @@ class GloveController:
                 self.command.chassis = States.TURN_LEFT
             else:
                 self.command.chassis = States.STOP
-
-        self.command.stop = False
 
     # ============================================================
     # LIFECYCLE

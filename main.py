@@ -1,19 +1,26 @@
+import RPi.GPIO as GPIO
+
 from systems import superstructure
 from systems.superstructure import Superstructure
-import RPi.GPIO as GPIO
 
 MODE = superstructure.Mode.KEYBOARD
 
-def main():
-    super = Superstructure(MODE)
 
+def main():
+    GPIO.setwarnings(False)
+    GPIO.setmode(GPIO.BCM)
+
+    _super = None
     try:
-        super.start()
+        _super = Superstructure(MODE)
+        _super.start()
         while True:
-            super.tick()
+            _super.tick()
     finally:
-        super.end()
+        if _super is not None:
+            _super.end()
         GPIO.cleanup()
+
 
 
 if __name__ == "__main__":
