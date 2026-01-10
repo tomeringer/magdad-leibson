@@ -15,6 +15,7 @@ class Ultrasonic:
         # ================= CONSTANT =================
         self.BASELINE_D = 37.5  # cm
         self.MINIMAL_D = 50     # cm
+        self.TIME_SLEEP = 0.06
 
         # GPIO setup
         GPIO.setup(self.TRIG_1, GPIO.OUT)
@@ -58,7 +59,7 @@ class Ultrasonic:
     def tick(self):
         try:
             l1 = self.measure_distance(self.TRIG_1, self.ECHO_1)
-            time.sleep(0.06)
+            time.sleep(self.TIME_SLEEP)
             l2 = self.measure_distance(self.TRIG_2, self.ECHO_2)
 
             self.drive = True
