@@ -68,9 +68,10 @@ class Superstructure:
 
         else:
             self.keyboard.tick()
-            self.set_command(self.keyboard.command)
 
             if not self.command.equal(self.last_command):
+                self.set_command(self.keyboard.command)
+
                 if self.command.gripper:
                     self.gripper.open_servo()
                 else:
