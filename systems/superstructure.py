@@ -36,7 +36,7 @@ class Superstructure:
     def set_command(self, n_command: Command):
         # Ultrasonic safety:
         # If too close (<40cm), BLOCK forward/turn, but allow reverse to back away.
-        if self.ultrasonic.drive and n_command.chassis in (
+        if not self.ultrasonic.drive and n_command.chassis in (
                 chassis.States.FORWARD,
                 chassis.States.TURN_LEFT,
                 chassis.States.TURN_RIGHT,
