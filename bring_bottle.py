@@ -355,7 +355,7 @@ def bring_bottle():
         stop_drive()
         print("Approached bottle.")
 
-        time.sleep(5)   
+        time.sleep()   
         while True:
             found_bottle = detect_bottle_once()
             if found_bottle["found"]:
@@ -565,12 +565,12 @@ def run_keyboard_loop():
                 bring_bottle()
                 print("[VISION] Finished bring_bottle.", flush=True)
 
-            elif c == 'bx':
+            elif c == 'e':
                 print("[VISION] Starting continuous bottle detection. Ctrl-C to stop.", flush=True)
                 bring_bottle_xz()
                 print("[VISION] Finished bring_bottle.", flush=True)
 
-            elif c == 'by':
+            elif c == 'y':
                 print("[VISION] Starting continuous bottle detection. Ctrl-C to stop.", flush=True)
                 bring_bottle_yxz()
                 print("[VISION] Finished bring_bottle.", flush=True)
