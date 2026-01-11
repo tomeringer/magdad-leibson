@@ -158,6 +158,33 @@ def stop_all_drive():
 def handle_payload(payload: int):
     global prev_f0, prev_f1, prev_f2, prev_f3, _last_distance_cm, _last_bottle
 
+    # ---------- Bottle override (if fresh) ----------
+    now = time.time()
+    if _last_bottle and _last_bottle.get("found", False):
+        age = now - float(_last_bottle.get("t", 0.0))
+        if age < BOTTLE_STALE_SEC:
+            Z = _last_bottle.get("Z", None)
+
+            # Ultrasonic safety still applies
+            _last_distance_cm = measure_distance_cm()
+            too_close = (_last_distance_cm is not None and _last_distance_cm < ULTRA_STOP_CM)
+
+            if too_close:
+                stop_all_drive()
+                return
+
+            # Simple approach policy (tune these thresholds!)
+            if isinstance(Z, (int, float)):
+                if Z > 50:  # far
+                    RIGHT_RPWM.value, LEFT_RPWM.value = 0.40, 0.40
+                    RIGHT_LPWM.value, LEFT_LPWM.value = 0.0, 0.0
+                    return
+                elif Z < 30:  # close enough -> stop + grab
+                    stop_all_drive()
+                    servo_move_step(1)  # close
+                    return
+            # If Z missing, just fall through to glove control
+
     # ---------- Original glove decoding ----------
     flex = (payload >> 4) & 0x0F
     roll_code = (payload >> 2) & 0x03
@@ -222,7 +249,6 @@ def run_glove_loop():
         try:
             topic, payload = sub.recv_multipart(flags=zmq.NOBLOCK)
             _last_bottle = json.loads(payload.decode("utf-8"))
-            print(str(_last_bottle))
         except zmq.Again:
             pass
         except Exception as e:
