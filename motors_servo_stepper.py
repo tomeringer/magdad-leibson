@@ -220,6 +220,7 @@ def run_glove_loop():
     while True:
         # ---- Pull latest bottle message (non-blocking) ----
         try:
+            print("Bla bla")
             topic, payload = sub.recv_multipart(flags=zmq.NOBLOCK)
             print("[ZMQ] got message on topic:", topic, "bytes:", len(payload), flush=True)
             _last_bottle = json.loads(payload.decode("utf-8"))
