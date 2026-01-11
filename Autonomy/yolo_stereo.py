@@ -217,7 +217,6 @@ if __name__ == '__main__':
             "h": H,
         }
         pub.send_multipart([b"bottle", json.dumps(msg).encode("utf-8")])
-        print("[VISION] publishing:", msg, flush=True)
 
         t_total = time.perf_counter() - t0
         metrics.log(t_unix=time.time(), bottle_x=X, bottle_y=Y, bottle_z=Z, t_proc=t_total)
