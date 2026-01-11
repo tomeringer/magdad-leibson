@@ -26,7 +26,11 @@ SILENCE_STOP_SEC = 0.7
 
 factory = PiGPIOFactory()
 
-STEPPER_CHUNK = 200
+STEPPER_CHUNK = 8                 # was 200 (much shorter -> feels continuous)
+STEPPER_STEP_DELAY_SEC = 0.0015   # faster than 0.005 (tweak as needed)
+STEPPER_TICK_SEC = 0.05           # issue a chunk at most every 50ms while held
+
+_last_stepper_cmd_t = 0.0
 
 # ============================================================
 # GLOBAL STATE
@@ -149,25 +153,22 @@ class StepperMotor:
         for p in self.pins:
             self.pi.set_mode(p, pigpio.OUTPUT)
 
-    def move(self, steps, direction=1):
+    def move(self, steps, direction=1, step_delay=0.005):
         for _ in range(int(steps)):
             for step in range(4):
                 idx = step if direction == 1 else 3 - step
                 for i, p in enumerate(self.pins):
                     self.pi.write(p, self.seq[idx][i])
-                time.sleep(0.005)
+                time.sleep(step_delay)
         for p in self.pins:
             self.pi.write(p, 0)
-
-
-_stepper = StepperMotor([23, 22, 27, 17])
-
 
 # ============================================================
 # PAYLOAD HANDLER (UNCHANGED LOGIC)
 # ============================================================
 def handle_payload(payload: int):
     global prev_f0, prev_f1, prev_f2, prev_f3
+    global _last_stepper_cmd_t
 
     flex = (payload >> 4) & 0x0F
     roll_code = (payload >> 2) & 0x03
@@ -178,6 +179,7 @@ def handle_payload(payload: int):
     f2 = (flex >> 2) & 1
     f3 = (flex >> 3) & 1
 
+    # Servo stays edge-triggered (so it doesn't keep moving while held)
     if f0 == 1 and prev_f0 == 0:
         print("[EVENT] Finger 0 pressed -> Closing Servo")
         servo_move_step(1)
@@ -188,11 +190,17 @@ def handle_payload(payload: int):
 
     prev_f0, prev_f1 = f0, f1
 
-    if f2 == 1 and prev_f2 == 0:
-        _stepper.move(STEPPER_CHUNK, 1)
-    if f3 == 1 and prev_f3 == 0:
-        _stepper.move(STEPPER_CHUNK, -1)
+    # Stepper becomes level-triggered + rate-limited
+    now = time.time()
+    if (f2 == 1 or f3 == 1) and (now - _last_stepper_cmd_t >= STEPPER_TICK_SEC):
+        if f2 == 1 and f3 == 0:
+            _stepper.move(STEPPER_CHUNK, 1, step_delay=STEPPER_STEP_DELAY_SEC)
+        elif f3 == 1 and f2 == 0:
+            _stepper.move(STEPPER_CHUNK, -1, step_delay=STEPPER_STEP_DELAY_SEC)
+        # if both held, do nothing (or choose a priority) — currently do nothing
+        _last_stepper_cmd_t = now
 
+    # Keep prev_f2/f3 updated if you still want them for logging/other uses
     prev_f2, prev_f3 = f2, f3
 
     too_close = obstacle_too_close()
@@ -204,10 +212,10 @@ def handle_payload(payload: int):
         RIGHT_LPWM.value, LEFT_LPWM.value = 0.51, 0.50
         RIGHT_RPWM.value = LEFT_RPWM.value = 0.0
     elif roll_code == 0b01 and not too_close:
-        RIGHT_LPWM.value, LEFT_RPWM.value = 0.51, 0.50
+        RIGHT_LPWM.value, LEFT_LPWM.value = 0.51, 0.50
         RIGHT_RPWM.value = LEFT_LPWM.value = 0.0
     elif roll_code == 0b10 and not too_close:
-        RIGHT_RPWM.value, LEFT_LPWM.value = 0.51, 0.50
+        RIGHT_RPWM.value, LEFT_RPWM.value = 0.51, 0.50
         RIGHT_LPWM.value = LEFT_RPWM.value = 0.0
     else:
         RIGHT_RPWM.value = RIGHT_LPWM.value = LEFT_RPWM.value = LEFT_LPWM.value = 0.0
