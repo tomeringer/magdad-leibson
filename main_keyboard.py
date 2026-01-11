@@ -28,7 +28,7 @@ SILENCE_STOP_SEC = 0.7
 factory = PiGPIOFactory()
 
 # ---- Stereo / YOLO config ----
-CALIBRATION_FILE_PATH = r"stereo_calibration.pkl"
+CALIBRATION_FILE_PATH = r"Autonomy/stereo_calibration.pkl"
 
 LEFT_CAM = "/dev/v4l/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.4:1.0-video-index0"
 RIGHT_CAM = "/dev/v4l/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0"
@@ -257,7 +257,7 @@ def init_vision():
 
     # Load YOLO (adjust to your actual model path)
     # _model = YOLO('yolov8n.pt')
-    _model = YOLO('yolov8n_ncnn_model', task='detect')
+    _model = YOLO('Autonomy/yolov8n_ncnn_model', task='detect')
 
     _cap_l = open_cam(LEFT_CAM, "LEFT")
     _cap_r = open_cam(RIGHT_CAM, "RIGHT")
