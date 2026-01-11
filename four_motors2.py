@@ -10,7 +10,7 @@ import RPi.GPIO as GPIO
 # ============================================================
 # INPUT MODE
 # ============================================================
-MODE = "KEYBOARD"   # "GLOVE" or "KEYBOARD"
+MODE = "GLOVE"   # "GLOVE" or "KEYBOARD"
 
 # ============================================================
 # WIFI / UDP GLOVE CONFIG
@@ -105,20 +105,24 @@ def servo_cleanup():
 
 # ============================================================
 # DC MOTORS (IBT-2) -- PWM + trim
+#
+# ACTUAL WIRING:
+#   RIGHT wheel: physical 3 + 5  -> BCM 2 + 3
+#   LEFT  wheel: physical 38+40  -> BCM 20+21
 # ============================================================
 PWM_HZ = 1000
 
-# M1 (right motor in your current mapping)
-M1_RPWM = PWMOutputDevice(18, frequency=PWM_HZ, initial_value=0)
-M1_LPWM = PWMOutputDevice(23, frequency=PWM_HZ, initial_value=0)
+# RIGHT wheel motor
+RIGHT_RPWM = PWMOutputDevice(2, frequency=PWM_HZ, initial_value=0)
+RIGHT_LPWM = PWMOutputDevice(3, frequency=PWM_HZ, initial_value=0)
 
-# M2 (LEFT motor: physical pins 18+22 -> BCM 24+25)
-M2_RPWM = PWMOutputDevice(24, frequency=PWM_HZ, initial_value=0)
-M2_LPWM = PWMOutputDevice(25, frequency=PWM_HZ, initial_value=0)
+# LEFT wheel motor
+LEFT_RPWM = PWMOutputDevice(20, frequency=PWM_HZ, initial_value=0)
+LEFT_LPWM = PWMOutputDevice(21, frequency=PWM_HZ, initial_value=0)
 
-# Tune this to remove drift (left motor slower => < 1.0)
-M1_SCALE = 1.00
-M2_SCALE = 0.90
+# Tune these if you want drift compensation
+RIGHT_SCALE = 0.51
+LEFT_SCALE = 0.50
 
 
 def _clamp01(x: float) -> float:
@@ -126,38 +130,59 @@ def _clamp01(x: float) -> float:
 
 
 def motor_stop():
-    M1_RPWM.value = 0.0
-    M1_LPWM.value = 0.0
-    M2_RPWM.value = 0.0
-    M2_LPWM.value = 0.0
+    RIGHT_RPWM.value = 0.0
+    RIGHT_LPWM.value = 0.0
+    LEFT_RPWM.value = 0.0
+    LEFT_LPWM.value = 0.0
 
 
-def motor1_forward(speed: float = 1.0):
-    s = _clamp01(speed) * M1_SCALE
-    M1_RPWM.value = s
-    M1_LPWM.value = 0.0
+def right_forward(speed: float = 1.0):
+    s = _clamp01(speed) * RIGHT_SCALE
+    RIGHT_RPWM.value = s
+    RIGHT_LPWM.value = 0.0
+
+
+def right_reverse(speed: float = 1.0):
+    s = _clamp01(speed) * RIGHT_SCALE
+    RIGHT_RPWM.value = 0.0
+    RIGHT_LPWM.value = s
+
+
+def left_forward(speed: float = 1.0):
+    s = _clamp01(speed) * LEFT_SCALE
+    LEFT_RPWM.value = s
+    LEFT_LPWM.value = 0.0
+
+
+def left_reverse(speed: float = 1.0):
+    s = _clamp01(speed) * LEFT_SCALE
+    LEFT_RPWM.value = 0.0
+    LEFT_LPWM.value = s
+
+
+# Backwards-compatible names used by the rest of the code
+def motor1_forward(speed: float = 1.0):  # motor1 = RIGHT wheel
+    right_forward(speed)
 
 
 def motor1_reverse(speed: float = 1.0):
-    s = _clamp01(speed) * M1_SCALE
-    M1_RPWM.value = 0.0
-    M1_LPWM.value = s
+    right_reverse(speed)
 
 
-def motor2_forward(speed: float = 1.0):
-    s = _clamp01(speed) * M2_SCALE
-    M2_RPWM.value = s
-    M2_LPWM.value = 0.0
+def motor2_forward(speed: float = 1.0):  # motor2 = LEFT wheel
+    left_forward(speed)
 
 
 def motor2_reverse(speed: float = 1.0):
-    s = _clamp01(speed) * M2_SCALE
-    M2_RPWM.value = 0.0
-    M2_LPWM.value = s
+    left_reverse(speed)
 
 
 # ============================================================
 # STEPPER (L298N 4-wire, your working implementation)
+#
+# ACTUAL WIRING (physical):
+#   IN1=16, IN2=15, IN3=13, IN4=11
+#   => BCM: 23, 22, 27, 17
 # ============================================================
 class StepperMotor:
     def __init__(self, name, pins):
@@ -196,8 +221,8 @@ class StepperMotor:
             GPIO.output(pin, 0)
 
 
-# Used already: 5,6,12,18,23,24,25
-STEPPER_PINS = [16, 19, 20, 21]  # L298N IN1..IN4
+# Used already: 2,3,5,6,12,20,21
+STEPPER_PINS = [23, 22, 27, 17]  # IN1..IN4
 _stepper = StepperMotor("Stepper(L298N)", STEPPER_PINS)
 
 STEPPER_SPEED_SEC = 0.005
@@ -271,15 +296,14 @@ def ultrasonic_too_close() -> bool:
 
 
 # ============================================================
-# UDP HELPERS (reliable like your working receiver)
+# UDP HELPERS
 # ============================================================
 def open_udp_socket_forever(bind_ip: str, bind_port: int):
     while True:
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            # Intentionally NOT using SO_REUSEADDR (helps catch port-conflicts loudly)
             s.bind((bind_ip, bind_port))
-            s.settimeout(0.05)  # 50ms blocking wait
+            s.settimeout(0.05)
             print(f"[UDP] Listening on {bind_ip}:{bind_port}")
             return s
         except Exception as e:
@@ -336,7 +360,6 @@ def handle_payload(payload: int):
         stepper_move(STEPPER_STEP_CHUNK, 0)
 
     # Decide desired DC drive action
-    # (same logic as before)
     desired = "stop"
     if pitch_code == 0b01:
         desired = "forward"
@@ -350,8 +373,7 @@ def handle_payload(payload: int):
         else:
             desired = "stop"
 
-    # Ultrasonic safety:
-    # If too close (<40cm), BLOCK forward/turn, but allow reverse to back away.
+    # Ultrasonic safety
     if ultrasonic_too_close() and desired in ("forward", "turn_left", "turn_right"):
         motor_stop()
         now = time.time()
@@ -391,7 +413,6 @@ def run_glove_loop():
 
     try:
         while True:
-            # ultrasonic runs continuously + prints periodically
             ultrasonic_tick()
 
             payload = read_one_udp_payload(sock)
@@ -474,7 +495,6 @@ def run_keyboard_loop():
                 _stepper.stop()
                 print("[KEYBOARD] stop all")
 
-            # DC motors (apply ultrasonic safety the same way)
             elif c == "w":
                 if ultrasonic_too_close():
                     motor_stop()
