@@ -338,7 +338,7 @@ def detect_bottle_once():
 
 
 def bring_bottle():
-    V = 96  # Forward speed cm/s
+    V = 123  # Forward speed cm/s
     time.sleep(3)
     while True:
         found_bottle = detect_bottle_once()
