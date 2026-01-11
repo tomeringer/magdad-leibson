@@ -412,13 +412,12 @@ def run_keyboard_loop():
                 servo_move_step(0)
 
             elif c == 'u':
-                print("[STEPPER] +50", flush=True)
-                _stepper.move(50, 1)
+                print("[STEPPER] +200", flush=True)
+                _stepper.move(200, 1)
 
             elif c == 'j':
-                print("[STEPPER] -50", flush=True)
-                _stepper.move(50, -1)
-
+                print("[STEPPER] -200", flush=True)
+                _stepper.move(200, -1)
             elif c == 'c':
                 print("[VISION] Detecting bottle (one-shot)...", flush=True)
                 res = detect_bottle_once()
