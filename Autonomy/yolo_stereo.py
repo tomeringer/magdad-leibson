@@ -1,3 +1,4 @@
+import math
 import pickle
 import time
 from datetime import datetime
@@ -205,7 +206,8 @@ if __name__ == '__main__':
                 disparity = abs(x_l - x_r)
 
                 if disparity > 0:
-                    X, Y, Z = calculate_3d_coords(disparity, x_l, y_l, Q_matrix)
+                    X, Y, R = calculate_3d_coords(disparity, x_l, y_l, Q_matrix)
+                    Z =  math.sqrt(R**2 - X**2 - Y**2)
 
                     # Draw the 3D coordinates (Z is the depth) onto the left frame
                     # Units (mm/cm/m) depend on how the Translation vector T was calibrated.
