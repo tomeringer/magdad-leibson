@@ -475,6 +475,11 @@ def shutdown_vision():
         pass
 
 
+def drive_2_seconds_forward():
+    drive_forward()
+    time.sleep(2)
+    stop_drive()
+
 # ============================================================
 # KEYBOARD LOOP
 # ============================================================
@@ -569,6 +574,11 @@ def run_keyboard_loop():
                 print("[VISION] Starting continuous bottle detection. Ctrl-C to stop.", flush=True)
                 bring_bottle_yxz()
                 print("[VISION] Finished bring_bottle.", flush=True)
+
+            elif c == 'f':
+                print("[DRIVE] Driving forward 2 seconds.", flush=True)
+                drive_2_seconds_forward()
+                print("[DRIVE] Finished 2 seconds forward.", flush=True)
 
             else:
                 print("[INFO] Unknown command. Use w/s/a/d/x/i/k/u/j/c/q", flush=True)
