@@ -338,7 +338,7 @@ def detect_bottle_once():
 
 
 def bring_bottle():
-    V = 96  # Forward speed cm/s
+    V = 90  # Forward speed cm/s
     time.sleep(3)
     while True:
         found_bottle = detect_bottle_once()
@@ -348,11 +348,24 @@ def bring_bottle():
             break
         else:
             print("No bottle detected.")
-    
-    servo_move_step(1)
+            
+    if found_bottle["Z"] > 45:
+        drive_forward()
+        time.sleep((found_bottle["Z"]-35)/(V*0.5))
+        stop_drive()
+        print("Approached bottle.")
+
+        time.sleep(3)   
+        while True:
+            found_bottle = detect_bottle_once()
+            if found_bottle["found"]:
+                print(f"Bottle at X={found_bottle['X']:.2f}, Y={found_bottle['Y']:.2f}, Z={found_bottle['Z']:.2f}")
+                break
+            else:
+                print("No bottle detected.")
+
     drive_forward()
-    time.sleep(found_bottle["Z"]/(V*0.5))  
-    stop_drive()
+    time.sleep(found_bottle["Z"]/(V*0.5))
     print("Arrived at bottle location.")
     time.sleep(1)
     servo_move_step(0)
@@ -362,42 +375,41 @@ def bring_bottle():
     stop_drive()
 
 
-
-def bring_bottle_advanced():
-    V = 96  # Forward speed cm/s
+def bring_bottle_xz():
+    V = 90  # Forward speed cm/s
+    time.sleep(3)
+    z0 = 22
+    d = 39
+    wheel_dist = None
     while True:
         found_bottle = detect_bottle_once()
         if found_bottle["found"]:
             print(f"Bottle at X={found_bottle['X']:.2f}, Y={found_bottle['Y']:.2f}, Z={found_bottle['Z']:.2f}")
             original_z = found_bottle['Z']
+            new_z = z0 + original_z
+            alpha = math.atan2(found_bottle['X'], new_z)
+            wheel_dist = alpha * d/2
             break
         else:
             print("No bottle detected.")
-
-    drive_forward(0.2)
-    # start_time = datetime.now().time()
-    # start_time_seconds = start_time.hour*3600+start_time.minute*60+start_time.second
-    while found_bottle["Z"] > 30.0:
-        found_bottle = detect_bottle_once()
-        if found_bottle["found"]:
-            print(f"Bottle at X={found_bottle['X']:.2f}, Y={found_bottle['Y']:.2f}, Z={found_bottle['Z']:.2f}, Time={datetime.now().time()}")
-        else:
-            print("Lost bottle during approach.")
-            stop_drive()
-            return
-    # Arrived 10cm from bottle bottle
+    
+    turn_time = abs(wheel_dist)/(V*0.5)
+    if wheel_dist > 0:
+        turn_left()
+    else:
+        turn_right()
+    time.sleep(turn_time)
     stop_drive()
-    found_bottle = detect_bottle_once()
-    servo_move_step(1)  
-    drive_forward(0.2)
-    time.sleep(found_bottle["Z"]/(V*0.2))  
+    print("Completed turn towards bottle.")
+    drive_forward()
+    time.sleep(math.hypot(found_bottle["Z"], found_bottle["X"])/(V*0.5))  
     stop_drive()
     print("Arrived at bottle location.")
     time.sleep(1)
     servo_move_step(0)
     time.sleep(1)
     drive_reverse()
-    time.sleep(original_z/(V*0.5))
+    time.sleep(math.hypot(found_bottle["Z"], found_bottle["X"])/(V*0.5))
     stop_drive()
 
 
