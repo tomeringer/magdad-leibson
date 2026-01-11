@@ -349,7 +349,7 @@ def bring_bottle():
         else:
             print("No bottle detected.")
             
-    if found_bottle["Z"] > 45:
+    if found_bottle["Z"] > 80:
         drive_forward()
         time.sleep((found_bottle["Z"]-35)/(V*0.5))
         stop_drive()
@@ -362,7 +362,7 @@ def bring_bottle():
                 print(f"Bottle at X={found_bottle['X']:.2f}, Y={found_bottle['Y']:.2f}, Z={found_bottle['Z']:.2f}")
                 break
             else:
-                print("No bottle detected.")
+                print("Lost bottle :(")
 
     drive_forward()
     time.sleep(found_bottle["Z"]/(V*0.5))
