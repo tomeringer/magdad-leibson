@@ -413,9 +413,54 @@ def bring_bottle_xz():
     stop_drive()
 
 
-def drive_2_seconds_forward():
+def bring_bottle_yxz():
+    V = 90  # Forward speed cm/s
+    time.sleep(3)
+    z0 = 22
+    d = 39
+    Y_PARAM = 15
+    wheel_dist = None
+    while True:
+        found_bottle = detect_bottle_once()
+        if found_bottle["found"]:
+            print(f"Bottle at X={found_bottle['X']:.2f}, Y={found_bottle['Y']:.2f}, Z={found_bottle['Z']:.2f}")
+            original_z = found_bottle['Z']
+            break
+        else:
+            print("No bottle detected.")
+    StepperMotor.move(abs(Y_PARAM*found_bottle["Y"]), 1)  
+    time.sleep(1)
+    
+
+    while True:
+        found_bottle = detect_bottle_once()
+        if found_bottle["found"]:
+            print(f"Bottle at X={found_bottle['X']:.2f}, Y={found_bottle['Y']:.2f}, Z={found_bottle['Z']:.2f}")
+            original_z = found_bottle['Z']
+            new_z = z0 + original_z
+            alpha = math.atan2(found_bottle['X'], new_z)
+            wheel_dist = alpha * d/2
+            break
+        else:
+            print("No bottle detected.")
+    
+    turn_time = abs(wheel_dist)/(V*0.5)
+    if wheel_dist > 0:
+        turn_left()
+    else:
+        turn_right()
+    time.sleep(turn_time)
+    stop_drive()
+    print("Completed turn towards bottle.")
     drive_forward()
-    time.sleep(4)
+    time.sleep(math.hypot(found_bottle["Z"], found_bottle["X"])/(V*0.5))  
+    stop_drive()
+    print("Arrived at bottle location.")
+    time.sleep(1)
+    servo_move_step(0)
+    time.sleep(1)
+    drive_reverse()
+    time.sleep(math.hypot(found_bottle["Z"], found_bottle["X"])/(V*0.5))
     stop_drive()
 
 
@@ -514,10 +559,16 @@ def run_keyboard_loop():
                 print("[VISION] Starting continuous bottle detection. Ctrl-C to stop.", flush=True)
                 bring_bottle()
                 print("[VISION] Finished bring_bottle.", flush=True)
-            
-            elif c == 'f':
-                print("[DRIVE] Driving forward for 2 seconds.", flush=True)
-                drive_2_seconds_forward()
+
+            elif c == 'bx':
+                print("[VISION] Starting continuous bottle detection. Ctrl-C to stop.", flush=True)
+                bring_bottle_xz()
+                print("[VISION] Finished bring_bottle.", flush=True)
+
+            elif c == 'by':
+                print("[VISION] Starting continuous bottle detection. Ctrl-C to stop.", flush=True)
+                bring_bottle_yxz()
+                print("[VISION] Finished bring_bottle.", flush=True)
 
             else:
                 print("[INFO] Unknown command. Use w/s/a/d/x/i/k/u/j/c/q", flush=True)
