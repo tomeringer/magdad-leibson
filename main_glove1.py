@@ -192,7 +192,7 @@ def handle_payload(payload: int):
             _stepper.move(STEPPER_CHUNK, 1, step_delay=STEPPER_STEP_DELAY_SEC)
         elif f3 == 1 and f2 == 0:
             _stepper.move(STEPPER_CHUNK, -1, step_delay=STEPPER_STEP_DELAY_SEC)
-        # if both held, do nothing (or choose a priority) — currently do nothing
+        # if both held, do nothing (or choose a priority) â€” currently do nothing
         _last_stepper_cmd_t = now
 
     # Keep prev_f2/f3 updated if you still want them for logging/other uses
