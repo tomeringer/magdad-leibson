@@ -16,7 +16,7 @@ from gpiozero.pins.pigpio import PiGPIOFactory
 # ============================================================
 # CONFIGURATION
 # ============================================================
-MODE = "GLOVE"
+MODE = "KEYBOARD"
 UDP_LISTEN_IP = "0.0.0.0"
 UDP_PORT = 4210
 FRAME_START = 0xAA
@@ -124,88 +124,128 @@ _stepper = StepperMotor([23, 22, 27, 17])
 
 
 # ============================================================
-# PAYLOAD HANDLER - EDGE DETECTION LOGIC
+# HELPERS (match your existing behavior)
 # ============================================================
-def handle_payload(payload: int):
-    global prev_f0, prev_f1, prev_f2, prev_f3, _last_distance_cm
+def stop_drive():
+    RIGHT_RPWM.value = RIGHT_LPWM.value = LEFT_RPWM.value = LEFT_LPWM.value = 0.0
 
-    # פענוח המידע
-    flex = (payload >> 4) & 0x0F
-    roll_code = (payload >> 2) & 0x03
-    pitch_code = payload & 0x03
 
-    # מצב נוכחי של אצבעות
-    f0 = (flex >> 0) & 1
-    f1 = (flex >> 1) & 1
-    f2 = (flex >> 2) & 1
-    f3 = (flex >> 3) & 1
+def drive_forward():
+    RIGHT_RPWM.value, LEFT_RPWM.value = 0.51, 0.50
+    RIGHT_LPWM.value, LEFT_LPWM.value = 0.0, 0.0
 
-    # --- לוגיקת סרוו (זיהוי מעבר מ-0 ל-1) ---
-    if f0 == 1 and prev_f0 == 0:
-        print("[EVENT] Finger 0 pressed -> Closing Servo")
-        servo_move_step(1)  # כיוון אחד
 
-    if f1 == 1 and prev_f1 == 0:
-        print("[EVENT] Finger 1 pressed -> Opening Servo")
-        servo_move_step(0)  # כיוון שני
+def drive_reverse():
+    RIGHT_LPWM.value, LEFT_LPWM.value = 0.51, 0.50
+    RIGHT_RPWM.value, LEFT_RPWM.value = 0.0, 0.0
 
-    # עדכון מצב קודם לסבב הבא
-    prev_f0, prev_f1 = f0, f1
 
-    # --- לוגיקת סטפר (זיהוי מעבר מ-0 ל-1) ---
-    if f2 == 1 and prev_f2 == 0:
-        _stepper.move(50, 1)
-    if f3 == 1 and prev_f3 == 0:
-        _stepper.move(50, -1)
+def turn_right():
+    RIGHT_LPWM.value, LEFT_RPWM.value = 0.51, 0.50
+    RIGHT_RPWM.value, LEFT_LPWM.value = 0.0, 0.0
 
-    prev_f2, prev_f3 = f2, f3
 
-    # --- לוגיקת תנועה (DC Motors) ---
-    _last_distance_cm = measure_distance_cm()
-    too_close = (_last_distance_cm is not None and _last_distance_cm < ULTRA_STOP_CM)
-
-    if pitch_code == 0b01 and not too_close:  # Forward
-        RIGHT_RPWM.value, LEFT_RPWM.value = 0.51, 0.50
-        RIGHT_LPWM.value, LEFT_LPWM.value = 0.0, 0.0
-    elif pitch_code == 0b10:  # Reverse
-        RIGHT_LPWM.value, LEFT_LPWM.value = 0.51, 0.50
-        RIGHT_RPWM.value, LEFT_RPWM.value = 0.0, 0.0
-    elif roll_code == 0b01 and not too_close:  # Right
-        RIGHT_LPWM.value, LEFT_RPWM.value = 0.51, 0.50
-        RIGHT_RPWM.value, LEFT_LPWM.value = 0.0, 0.0
-    elif roll_code == 0b10 and not too_close:  # Left
-        RIGHT_RPWM.value, LEFT_LPWM.value = 0.51, 0.50
-        RIGHT_LPWM.value, LEFT_RPWM.value = 0.0, 0.0
-    else:
-        RIGHT_RPWM.value = RIGHT_LPWM.value = LEFT_RPWM.value = LEFT_LPWM.value = 0.0
+def turn_left():
+    RIGHT_RPWM.value, LEFT_LPWM.value = 0.51, 0.50
+    RIGHT_LPWM.value, LEFT_RPWM.value = 0.0, 0.0
 
 
 # ============================================================
-# MAIN LOOP
+# KEYBOARD LOOP (replaces UDP glove loop)
 # ============================================================
-def run_glove_loop():
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.bind((UDP_LISTEN_IP, UDP_PORT))
-    sock.settimeout(0.1)
-    print(f"[RUNNING] Edge Detection Mode on Port {UDP_PORT}")
+def run_keyboard_loop():
+    global _last_distance_cm
 
-    last_rx = time.time()
+    print("\n[READY] w/s/a/d=Drive, x=Stop, i/k=Servo, u/j=Stepper, q=Quit")
+    print("        (Ultrasonic safety: forward/turn disabled if too close)\n")
+
     while True:
         try:
-            data, addr = sock.recvfrom(1024)
-            if len(data) >= 3 and data[0] == FRAME_START and data[2] == FRAME_END:
-                handle_payload(data[1])
-                last_rx = time.time()
-        except socket.timeout:
-            if time.time() - last_rx > SILENCE_STOP_SEC:
-                RIGHT_RPWM.value = RIGHT_LPWM.value = LEFT_RPWM.value = LEFT_LPWM.value = 0.0
-        time.sleep(CONTROL_PERIOD_SEC)
+            cmd = input("cmd> ").strip().lower()
+            if not cmd:
+                continue
+            c = cmd[0]
+
+            if c == 'q':
+                print("[QUIT]")
+                break
+
+            # Measure distance each command (same as handle_payload)
+            _last_distance_cm = measure_distance_cm()
+            too_close = (_last_distance_cm is not None and _last_distance_cm < ULTRA_STOP_CM)
+
+            if _last_distance_cm is None:
+                print("[ULTRA] distance=None (timeout)")
+            else:
+                print(f"[ULTRA] distance={_last_distance_cm:.1f} cm (stop<{ULTRA_STOP_CM:.1f})")
+
+            if c == 'x':
+                stop_drive()
+                print("[STOP] Drive stopped")
+
+            elif c == 'w':  # Forward (blocked by ultrasonic)
+                if too_close:
+                    stop_drive()
+                    print("[BLOCKED] Too close -> stop")
+                else:
+                    drive_forward()
+                    print("[DRIVE] Forward")
+
+            elif c == 's':  # Reverse (allowed even if close)
+                drive_reverse()
+                print("[DRIVE] Reverse")
+
+            elif c == 'a':  # Left (blocked by ultrasonic)
+                if too_close:
+                    stop_drive()
+                    print("[BLOCKED] Too close -> stop")
+                else:
+                    turn_left()
+                    print("[TURN] Left")
+
+            elif c == 'd':  # Right (blocked by ultrasonic)
+                if too_close:
+                    stop_drive()
+                    print("[BLOCKED] Too close -> stop")
+                else:
+                    turn_right()
+                    print("[TURN] Right")
+
+            elif c == 'i':  # Servo close (same as finger0 rising edge)
+                print("[SERVO] Close step")
+                servo_move_step(1)
+
+            elif c == 'k':  # Servo open (same as finger1 rising edge)
+                print("[SERVO] Open step")
+                servo_move_step(0)
+
+            elif c == 'u':  # Stepper +50 (same as finger2 rising edge)
+                print("[STEPPER] +50")
+                _stepper.move(50, 1)
+
+            elif c == 'j':  # Stepper -50 (same as finger3 rising edge)
+                print("[STEPPER] -50")
+                _stepper.move(50, -1)
+
+            else:
+                print("[INFO] Unknown command. Use w/s/a/d/x/i/k/u/j/q")
+
+        except UnicodeDecodeError:
+            print("[ERROR] Switch keyboard to ENGLISH!")
+        except KeyboardInterrupt:
+            print("\n[QUIT] KeyboardInterrupt")
+            break
+        except Exception as e:
+            print(f"[ERROR] {e}")
+
+    # Safety on exit
+    stop_drive()
 
 
 if __name__ == "__main__":
     servo_init()
     try:
-        run_glove_loop()
+        run_keyboard_loop()
     except KeyboardInterrupt:
         pass
     finally:
