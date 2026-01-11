@@ -279,9 +279,6 @@ def detect_bottle_once():
     """
     global _model, _cap_l, _cap_r, _maps_l, _maps_r, _Q
 
-    if not _vision_ready:
-        init_vision()
-
     t0 = time.perf_counter()
 
     ret_l, frame_l_orig = _cap_l.read()
@@ -450,6 +447,7 @@ if __name__ == "__main__":
     # init_vision()
 
     try:
+        init_vision()
         run_keyboard_loop()
     finally:
         stop_drive()
