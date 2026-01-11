@@ -33,12 +33,15 @@ STEPPER_TICK_SEC = 0.05           # issue a chunk at most every 50ms while held
 _last_stepper_cmd_t = 0.0
 
 # ============================================================
-# GLOBAL STATE
+# FLEX STATE (EDGE DETECTION)
 # ============================================================
-prev_f0 = prev_f1 = prev_f2 = prev_f3 = 0
+prev_step_up = 0
+prev_step_down = 0
+prev_servo_close = 0
+prev_servo_open = 0
 
 # ============================================================
-# ULTRASONIC SENSORS (ASYNC – FROM FIRST CODE)
+# ULTRASONIC (UNCHANGED)
 # ============================================================
 US1_TRIG, US1_ECHO = 5, 6
 US2_TRIG, US2_ECHO = 13, 19
@@ -93,11 +96,7 @@ def ultrasonic_tick():
 
 
 def obstacle_too_close() -> bool:
-    for d in _last_distances:
-        if d is not None and d < ULTRA_STOP_CM:
-            return True
-    return False
-
+    return any(d is not None and d < ULTRA_STOP_CM for d in _last_distances)
 
 # ============================================================
 # SERVO
@@ -120,19 +119,15 @@ def servo_init():
     print(f"[SERVO] Ready on GPIO {SERVO_PIN}")
 
 
-def servo_move_step(direction: int):
+def servo_move_step(close: bool):
     global current_pos
-    if _servo is None:
-        return
-
-    new_val = current_pos - MOVE_STEP if direction == 1 else current_pos + MOVE_STEP
-    current_pos = max(-1.0, min(1.0, new_val))
+    delta = -MOVE_STEP if close else MOVE_STEP
+    current_pos = max(-1.0, min(1.0, current_pos + delta))
     _servo.value = current_pos
-    print(f"[SERVO] Edge Detected! Moved to {current_pos:.2f}")
-
+    print(f"[SERVO] Moved to {current_pos:.2f}")
 
 # ============================================================
-# DC & STEPPER MOTORS
+# MOTORS
 # ============================================================
 RIGHT_RPWM = PWMOutputDevice(2, frequency=1000, initial_value=0, pin_factory=factory)
 RIGHT_LPWM = PWMOutputDevice(3, frequency=1000, initial_value=0, pin_factory=factory)
@@ -142,15 +137,15 @@ LEFT_LPWM  = PWMOutputDevice(21, frequency=1000, initial_value=0, pin_factory=fa
 
 class StepperMotor:
     def __init__(self, pins):
-        self.pins = pins
         self.pi = pigpio.pi()
+        self.pins = pins
         self.seq = [
             [1, 0, 1, 0],
             [0, 1, 1, 0],
             [0, 1, 0, 1],
             [0, 0, 1, 1],
         ]
-        for p in self.pins:
+        for p in pins:
             self.pi.set_mode(p, pigpio.OUTPUT)
 
     def move(self, steps, direction=1, step_delay=0.005):
@@ -164,7 +159,7 @@ class StepperMotor:
             self.pi.write(p, 0)
 
 # ============================================================
-# PAYLOAD HANDLER (UNCHANGED LOGIC)
+# PAYLOAD HANDLER (UPDATED MAPPING)
 # ============================================================
 def handle_payload(payload: int):
     global prev_f0, prev_f1, prev_f2, prev_f3
@@ -174,10 +169,10 @@ def handle_payload(payload: int):
     roll_code = (payload >> 2) & 0x03
     pitch_code = payload & 0x03
 
-    f0 = (flex >> 0) & 1
-    f1 = (flex >> 1) & 1
-    f2 = (flex >> 2) & 1
-    f3 = (flex >> 3) & 1
+    step_up       = (flex >> 0) & 1
+    step_down     = (flex >> 1) & 1
+    servo_close   = (flex >> 2) & 1
+    servo_open    = (flex >> 3) & 1
 
     # Servo stays edge-triggered (so it doesn't keep moving while held)
     if f0 == 1 and prev_f0 == 0:
@@ -220,21 +215,19 @@ def handle_payload(payload: int):
     else:
         RIGHT_RPWM.value = RIGHT_LPWM.value = LEFT_RPWM.value = LEFT_LPWM.value = 0.0
 
-
 # ============================================================
-# MAIN LOOP (UNCHANGED STRUCTURE)
+# MAIN LOOP
 # ============================================================
 def run_glove_loop():
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind((UDP_LISTEN_IP, UDP_PORT))
     sock.settimeout(0.1)
 
-    print(f"[RUNNING] Edge Detection Mode + Async Ultrasonic on Port {UDP_PORT}")
+    print(f"[RUNNING] Glove Receiver on UDP {UDP_PORT}")
 
     last_rx = time.time()
     while True:
         ultrasonic_tick()
-
         try:
             data, _ = sock.recvfrom(1024)
             if len(data) >= 3 and data[0] == FRAME_START and data[2] == FRAME_END:
@@ -243,9 +236,7 @@ def run_glove_loop():
         except socket.timeout:
             if time.time() - last_rx > SILENCE_STOP_SEC:
                 RIGHT_RPWM.value = RIGHT_LPWM.value = LEFT_RPWM.value = LEFT_LPWM.value = 0.0
-
         time.sleep(CONTROL_PERIOD_SEC)
-
 
 # ============================================================
 # ENTRY
