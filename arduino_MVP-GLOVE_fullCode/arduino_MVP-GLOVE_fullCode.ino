@@ -94,7 +94,7 @@ float wrapAngle(float a) {
 
 void readIMU(Vec3 &acc, Vec3 &gyr, Vec3 &mag) {
   if (imu.dataReady()) {
-    imu.getAGMT();
+    imu.getAGMT(); 
     acc = { imu.accX() * ACC_MG_TO_G, imu.accY() * ACC_MG_TO_G, imu.accZ() * ACC_MG_TO_G };
     gyr = { imu.gyrX() - GYRO_BIAS_DPS_X, imu.gyrY() - GYRO_BIAS_DPS_Y, imu.gyrZ() - GYRO_BIAS_DPS_Z };
     mag = { (imu.magX() - MAG_OFF_X) * MAG_SCALE_X,
