@@ -1,0 +1,40 @@
+from gpiozero import Servo
+from gpiozero.pins.pigpio import PiGPIOFactory
+
+# --- הגדרות חומרה וכיול ---
+SERVO_PIN = 8
+MOVE_STEP = 0.39  # 70 מעלות עבור מנוע 360
+MY_ZERO = -0.95   # נקודת המוצא הקרובה למיקום הפיזי שלך
+
+factory = PiGPIOFactory()
+servo = Servo(
+    SERVO_PIN,
+    initial_value=None,
+    min_pulse_width=0.5 / 1000,
+    max_pulse_width=2.5 / 1000,
+    pin_factory=factory
+)
+
+current_pos = MY_ZERO
+
+def open_servo():
+    """מבצע תנועת פתיחה של 70 מעלות"""
+    global current_pos
+    new_val = current_pos + MOVE_STEP
+    if new_val > 1.0: new_val = 1.0
+    
+    current_pos = new_val
+    servo.value = current_pos
+
+def close_servo():
+    """מבצע תנועת סגירה של 70 מעלות"""
+    global current_pos
+    new_val = current_pos - MOVE_STEP
+    if new_val < -1.0: new_val = -1.0
+    
+    current_pos = new_val
+    servo.value = current_pos
+
+def stop_servo():
+    """משחרר את המנוע (מומלץ לקרוא לזה בסיום התוכנית הכללית)"""
+    servo.detach()
