@@ -323,8 +323,9 @@ def detect_bottle_once():
                 # Standard: calculate_3d_coords returns X,Y,Z in the units implied by calibration T
                 R = 0
                 X, Y, R = calculate_3d_coords(disparity, cx, cy, _Q)
-                Z =  math.sqrt(R**2 - X**2 - Y**2) * 0.94 # cos(tetha) correction factor
-
+                # Z =  math.sqrt(R**2 - X**2 - Y**2)
+                Z = R
+                
     t_proc = time.perf_counter() - t0
     return {
         "found": X is not None,
