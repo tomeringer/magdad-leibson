@@ -26,19 +26,24 @@ SILENCE_STOP_SEC = 0.7
 
 factory = PiGPIOFactory()
 
-STEPPER_CHUNK = 8                 # was 200 (much shorter -> feels continuous)
+# Stepper: continuous feel
+STEPPER_CHUNK = 8                 # short chunk -> feels continuous
 STEPPER_STEP_DELAY_SEC = 0.0015   # faster than 0.005 (tweak as needed)
-STEPPER_TICK_SEC = 0.05           # issue a chunk at most every 50ms while held
-
+STEPPER_TICK_SEC = 0.05           # run a chunk at most every 50ms while held
 _last_stepper_cmd_t = 0.0
 
 # ============================================================
-# GLOBAL STATE
+# FLEX STATE (EDGE DETECTION FOR SERVO; OPTIONAL FOR LOGGING)
+# New mapping (flex nibble bits):
+#   bit0 step_up, bit1 step_down, bit2 servo_close, bit3 servo_open
 # ============================================================
-prev_f0 = prev_f1 = prev_f2 = prev_f3 = 0
+prev_step_up = 0
+prev_step_down = 0
+prev_servo_close = 0
+prev_servo_open = 0
 
 # ============================================================
-# ULTRASONIC SENSORS (ASYNC – FROM FIRST CODE)
+# ULTRASONIC SENSORS (ASYNC)
 # ============================================================
 US1_TRIG, US1_ECHO = 5, 6
 US2_TRIG, US2_ECHO = 13, 19
@@ -121,6 +126,10 @@ def servo_init():
 
 
 def servo_move_step(direction: int):
+    """
+    direction=1 -> close (decrease value)
+    direction=0 -> open  (increase value)
+    """
     global current_pos
     if _servo is None:
         return
@@ -132,20 +141,23 @@ def servo_move_step(direction: int):
 
 
 # ============================================================
-# DC & STEPPER MOTORS
+# DC MOTORS
 # ============================================================
 RIGHT_RPWM = PWMOutputDevice(2, frequency=1000, initial_value=0, pin_factory=factory)
 RIGHT_LPWM = PWMOutputDevice(3, frequency=1000, initial_value=0, pin_factory=factory)
 LEFT_RPWM  = PWMOutputDevice(20, frequency=1000, initial_value=0, pin_factory=factory)
 LEFT_LPWM  = PWMOutputDevice(21, frequency=1000, initial_value=0, pin_factory=factory)
 
-
+# ============================================================
+# STEPPER
+# ============================================================
 class StepperMotor:
     def __init__(self, pins):
         self.pins = pins
         self.pi = pigpio.pi()
         if not self.pi.connected:
             raise RuntimeError("pigpio daemon not running. Run: sudo systemctl start pigpiod")
+
         self.seq = [
             [1, 0, 1, 0],
             [0, 1, 1, 0],
@@ -164,48 +176,56 @@ class StepperMotor:
                 time.sleep(step_delay)
         for p in self.pins:
             self.pi.write(p, 0)
+
+
 _stepper = StepperMotor([23, 22, 27, 17])
 
 # ============================================================
-# PAYLOAD HANDLER (UNCHANGED LOGIC)
+# PAYLOAD HANDLER (UPDATED MAPPING)
 # ============================================================
 def handle_payload(payload: int):
-    global prev_f0, prev_f1, prev_f2, prev_f3
+    global prev_step_up, prev_step_down, prev_servo_close, prev_servo_open
     global _last_stepper_cmd_t
 
     flex = (payload >> 4) & 0x0F
     roll_code = (payload >> 2) & 0x03
     pitch_code = payload & 0x03
 
-    f0 = (flex >> 0) & 1
-    f1 = (flex >> 1) & 1
-    f2 = (flex >> 2) & 1
-    f3 = (flex >> 3) & 1
+    # NEW mapping:
+    step_up     = (flex >> 0) & 1
+    step_down   = (flex >> 1) & 1
+    servo_close = (flex >> 2) & 1
+    servo_open  = (flex >> 3) & 1
 
-    # Servo stays edge-triggered (so it doesn't keep moving while held)
-    if f0 == 1 and prev_f0 == 0:
-        print("[EVENT] Finger 0 pressed -> Closing Servo")
+    # --- SERVO: EDGE DETECTION (press once -> one step) ---
+    if servo_close == 1 and prev_servo_close == 0:
+        print("[EVENT] Servo CLOSE")
         servo_move_step(1)
 
-    if f1 == 1 and prev_f1 == 0:
-        print("[EVENT] Finger 1 pressed -> Opening Servo")
+    if servo_open == 1 and prev_servo_open == 0:
+        print("[EVENT] Servo OPEN")
         servo_move_step(0)
 
-    prev_f0, prev_f1 = f0, f1
+    prev_servo_close = servo_close
+    prev_servo_open = servo_open
 
-    # Stepper becomes level-triggered + rate-limited
+    # --- STEPPER: LEVEL TRIGGERED + RATE LIMITED (hold -> continuous) ---
     now = time.time()
-    if (f2 == 1 or f3 == 1) and (now - _last_stepper_cmd_t >= STEPPER_TICK_SEC):
-        if f2 == 1 and f3 == 0:
-            _stepper.move(STEPPER_CHUNK, 1, step_delay=STEPPER_STEP_DELAY_SEC)
-        elif f3 == 1 and f2 == 0:
+    if (step_up == 1 or step_down == 1) and (now - _last_stepper_cmd_t >= STEPPER_TICK_SEC):
+        if step_up == 1 and step_down == 0:
+            # "UP" -> direction +1
+            _stepper.move(STEPPER_CHUNK, +1, step_delay=STEPPER_STEP_DELAY_SEC)
+        elif step_down == 1 and step_up == 0:
+            # "DOWN" -> direction -1
             _stepper.move(STEPPER_CHUNK, -1, step_delay=STEPPER_STEP_DELAY_SEC)
-        # if both held, do nothing (or choose a priority) — currently do nothing
+        # if both held -> do nothing
         _last_stepper_cmd_t = now
 
-    # Keep prev_f2/f3 updated if you still want them for logging/other uses
-    prev_f2, prev_f3 = f2, f3
+    # (Optional: keep these updated if you want them for debug)
+    prev_step_up = step_up
+    prev_step_down = step_down
 
+    # --- DRIVE (UNCHANGED) ---
     too_close = obstacle_too_close()
 
     if pitch_code == 0b01 and not too_close:
@@ -215,7 +235,7 @@ def handle_payload(payload: int):
         RIGHT_LPWM.value, LEFT_LPWM.value = 0.51, 0.50
         RIGHT_RPWM.value = LEFT_RPWM.value = 0.0
     elif roll_code == 0b01 and not too_close:
-        RIGHT_LPWM.value, LEFT_LPWM.value = 0.51, 0.50
+        RIGHT_LPWM.value, LEFT_RPWM.value = 0.51, 0.50
         RIGHT_RPWM.value = LEFT_LPWM.value = 0.0
     elif roll_code == 0b10 and not too_close:
         RIGHT_RPWM.value, LEFT_RPWM.value = 0.51, 0.50
@@ -225,14 +245,14 @@ def handle_payload(payload: int):
 
 
 # ============================================================
-# MAIN LOOP (UNCHANGED STRUCTURE)
+# MAIN LOOP
 # ============================================================
 def run_glove_loop():
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind((UDP_LISTEN_IP, UDP_PORT))
     sock.settimeout(0.1)
 
-    print(f"[RUNNING] Edge Detection Mode + Async Ultrasonic on Port {UDP_PORT}")
+    print(f"[RUNNING] Glove Receiver + Async Ultrasonic on UDP {UDP_PORT}")
 
     last_rx = time.time()
     while True:
