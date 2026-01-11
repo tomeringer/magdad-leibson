@@ -221,8 +221,9 @@ def run_glove_loop():
         # ---- Pull latest bottle message (non-blocking) ----
         try:
             topic, payload = sub.recv_multipart(flags=zmq.NOBLOCK)
+            print("[ZMQ] got message on topic:", topic, "bytes:", len(payload), flush=True)
             _last_bottle = json.loads(payload.decode("utf-8"))
-            print(str(_last_bottle))
+            print("[ZMQ] decoded:", _last_bottle, flush=True)
         except zmq.Again:
             pass
         except Exception as e:
