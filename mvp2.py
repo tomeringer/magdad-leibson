@@ -259,12 +259,12 @@ def handle_payload(payload: int):
         RIGHT_RPWM.value = LEFT_RPWM.value = 0.0
 
     elif roll_code == 0b01 and not too_close:
-        RIGHT_LPWM.value, LEFT_RPWM.value = 0.51, 0.50
-        RIGHT_RPWM.value = LEFT_LPWM.value = 0.0
-
-    elif roll_code == 0b10 and not too_close:
         RIGHT_RPWM.value, LEFT_LPWM.value = 0.51, 0.50
         RIGHT_LPWM.value = LEFT_RPWM.value = 0.0
+        
+    elif roll_code == 0b10 and not too_close:
+        RIGHT_LPWM.value, LEFT_RPWM.value = 0.51, 0.50
+        RIGHT_RPWM.value = LEFT_LPWM.value = 0.0
 
     else:
         stop_dc()
