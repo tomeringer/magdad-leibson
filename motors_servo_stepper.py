@@ -1,12 +1,8 @@
-# =========================
-# FILE: control_sub.py
-# (Your robot control code + ZeroMQ SUB)
-# =========================
-
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
 import os
+
 os.environ['PIGPIO_ADDR'] = 'localhost'
 
 import time
@@ -16,9 +12,6 @@ import RPi.GPIO as GPIO
 from typing import Optional
 from gpiozero import PWMOutputDevice, Servo
 from gpiozero.pins.pigpio import PiGPIOFactory
-
-import zmq
-import json
 
 # ============================================================
 # CONFIGURATION
@@ -33,19 +26,6 @@ CONTROL_PERIOD_SEC = 0.01
 SILENCE_STOP_SEC = 0.7
 
 factory = PiGPIOFactory()
-
-# ================= ZERO MQ SUBSCRIBER =================
-ZMQ_ADDR = "tcp://127.0.0.1:5555"  # replace with vision IP if remote
-BOTTLE_STALE_SEC = 0.3
-_last_bottle = None
-
-ctx = zmq.Context.instance()
-sub = ctx.socket(zmq.SUB)
-sub.setsockopt(zmq.SUBSCRIBE, b"bottle")
-sub.setsockopt(zmq.CONFLATE, 1)  # keep latest only
-sub.setsockopt(zmq.RCVHWM, 1)
-sub.connect(ZMQ_ADDR)
-print("[ZMQ] Subscribed to", ZMQ_ADDR)
 
 # משתנים לשמירת מצב קודם של האצבעות (לזיהוי שינוי מ-0 ל-1)
 prev_f0 = 0
@@ -73,12 +53,10 @@ def measure_distance_cm() -> Optional[float]:
     GPIO.output(TRIG, False)
     t0 = time.time()
     while GPIO.input(ECHO) == 0:
-        if time.time() - t0 > 0.03:
-            return None
+        if time.time() - t0 > 0.03: return None
     ps = time.time()
     while GPIO.input(ECHO) == 1:
-        if time.time() - ps > 0.03:
-            return None
+        if time.time() - ps > 0.03: return None
     pe = time.time()
     return (pe - ps) * 17150.0
 
@@ -104,14 +82,14 @@ def servo_move_step(direction: int):
     direction: 1 for minus step, 0 for plus step
     """
     global current_pos
-    if _servo is None:
-        return
+    if _servo is None: return
 
     if direction == 1:
         new_val = current_pos - MOVE_STEP
     else:
         new_val = current_pos + MOVE_STEP
 
+    # Clamping
     current_pos = max(-1.0, min(1.0, new_val))
     _servo.value = current_pos
     print(f"[SERVO] Edge Detected! Moved to {current_pos:.2f}")
@@ -131,80 +109,50 @@ class StepperMotor:
         self.pins = pins
         self.pi = pigpio.pi()
         self.seq = [[1, 0, 1, 0], [0, 1, 1, 0], [0, 1, 0, 1], [0, 0, 1, 1]]
-        for p in self.pins:
-            self.pi.set_mode(p, pigpio.OUTPUT)
+        for p in self.pins: self.pi.set_mode(p, pigpio.OUTPUT)
 
     def move(self, steps, direction=1):
         for _ in range(int(steps)):
             for step in range(len(self.seq)):
                 idx = step if direction == 1 else (3 - step)
-                for i, p in enumerate(self.pins):
-                    self.pi.write(p, self.seq[idx][i])
+                for i, p in enumerate(self.pins): self.pi.write(p, self.seq[idx][i])
                 time.sleep(0.005)
-        for p in self.pins:
-            self.pi.write(p, 0)
+        for p in self.pins: self.pi.write(p, 0)
 
 
 _stepper = StepperMotor([23, 22, 27, 17])
 
 
-def stop_all_drive():
-    RIGHT_RPWM.value = RIGHT_LPWM.value = LEFT_RPWM.value = LEFT_LPWM.value = 0.0
-
-
 # ============================================================
-# PAYLOAD HANDLER - EDGE DETECTION LOGIC + BOTTLE OVERRIDE
+# PAYLOAD HANDLER - EDGE DETECTION LOGIC
 # ============================================================
 def handle_payload(payload: int):
-    global prev_f0, prev_f1, prev_f2, prev_f3, _last_distance_cm, _last_bottle
+    global prev_f0, prev_f1, prev_f2, prev_f3, _last_distance_cm
 
-    # ---------- Bottle override (if fresh) ----------
-    now = time.time()
-    if _last_bottle and _last_bottle.get("found", False):
-        age = now - float(_last_bottle.get("t", 0.0))
-        if age < BOTTLE_STALE_SEC:
-            Z = _last_bottle.get("Z", None)
-
-            # Ultrasonic safety still applies
-            _last_distance_cm = measure_distance_cm()
-            too_close = (_last_distance_cm is not None and _last_distance_cm < ULTRA_STOP_CM)
-
-            if too_close:
-                stop_all_drive()
-                return
-
-            # Simple approach policy (tune these thresholds!)
-            if isinstance(Z, (int, float)):
-                if Z > 50:  # far
-                    RIGHT_RPWM.value, LEFT_RPWM.value = 0.40, 0.40
-                    RIGHT_LPWM.value, LEFT_LPWM.value = 0.0, 0.0
-                    return
-                elif Z < 30:  # close enough -> stop + grab
-                    stop_all_drive()
-                    servo_move_step(1)  # close
-                    return
-            # If Z missing, just fall through to glove control
-
-    # ---------- Original glove decoding ----------
+    # פענוח המידע
     flex = (payload >> 4) & 0x0F
     roll_code = (payload >> 2) & 0x03
     pitch_code = payload & 0x03
 
+    # מצב נוכחי של אצבעות
     f0 = (flex >> 0) & 1
     f1 = (flex >> 1) & 1
     f2 = (flex >> 2) & 1
     f3 = (flex >> 3) & 1
 
+    # --- לוגיקת סרוו (זיהוי מעבר מ-0 ל-1) ---
     if f0 == 1 and prev_f0 == 0:
         print("[EVENT] Finger 0 pressed -> Closing Servo")
-        servo_move_step(1)
+        servo_move_step(1)  # כיוון אחד
 
     if f1 == 1 and prev_f1 == 0:
         print("[EVENT] Finger 1 pressed -> Opening Servo")
-        servo_move_step(0)
+        servo_move_step(0)  # כיוון שני
 
+    # עדכון מצב קודם לסבב הבא
     prev_f0, prev_f1 = f0, f1
 
+    # --- לוגיקת סטפר (זיהוי מעבר מ-0 ל-1) ---
     if f2 == 1 and prev_f2 == 0:
         _stepper.move(50, 1)
     if f3 == 1 and prev_f3 == 0:
@@ -212,6 +160,7 @@ def handle_payload(payload: int):
 
     prev_f2, prev_f3 = f2, f3
 
+    # --- לוגיקת תנועה (DC Motors) ---
     _last_distance_cm = measure_distance_cm()
     too_close = (_last_distance_cm is not None and _last_distance_cm < ULTRA_STOP_CM)
 
@@ -225,36 +174,23 @@ def handle_payload(payload: int):
         RIGHT_LPWM.value, LEFT_RPWM.value = 0.51, 0.50
         RIGHT_RPWM.value, LEFT_LPWM.value = 0.0, 0.0
     elif roll_code == 0b10 and not too_close:  # Left
-        RIGHT_RPWM.value, LEFT_RPWM.value = 0.51, 0.50
+        RIGHT_RPWM.value, LEFT_LPWM.value = 0.51, 0.50
         RIGHT_LPWM.value, LEFT_RPWM.value = 0.0, 0.0
     else:
-        stop_all_drive()
+        RIGHT_RPWM.value = RIGHT_LPWM.value = LEFT_RPWM.value = LEFT_LPWM.value = 0.0
 
 
 # ============================================================
 # MAIN LOOP
 # ============================================================
 def run_glove_loop():
-    global _last_bottle
-
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind((UDP_LISTEN_IP, UDP_PORT))
     sock.settimeout(0.1)
     print(f"[RUNNING] Edge Detection Mode on Port {UDP_PORT}")
 
     last_rx = time.time()
-
     while True:
-        # ---- Pull latest bottle message (non-blocking) ----
-        try:
-            topic, payload = sub.recv_multipart(flags=zmq.NOBLOCK)
-            _last_bottle = json.loads(payload.decode("utf-8"))
-        except zmq.Again:
-            pass
-        except Exception as e:
-            print("[ZMQ] decode error:", e)
-
-        # ---- Original UDP receive ----
         try:
             data, addr = sock.recvfrom(1024)
             if len(data) >= 3 and data[0] == FRAME_START and data[2] == FRAME_END:
@@ -262,8 +198,7 @@ def run_glove_loop():
                 last_rx = time.time()
         except socket.timeout:
             if time.time() - last_rx > SILENCE_STOP_SEC:
-                stop_all_drive()
-
+                RIGHT_RPWM.value = RIGHT_LPWM.value = LEFT_RPWM.value = LEFT_LPWM.value = 0.0
         time.sleep(CONTROL_PERIOD_SEC)
 
 
@@ -274,6 +209,5 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         pass
     finally:
-        stop_all_drive()
         GPIO.cleanup()
         print("\n[OFF] System Stopped.")
