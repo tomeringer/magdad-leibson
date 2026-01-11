@@ -5,15 +5,29 @@
 #include <ESPmDNS.h> // Dynamic IP discovery library
 
 // ========================================================
+//          BYTE → BINARY PRINT (OPTION 5)
+// ========================================================
+#define BYTE_TO_BINARY_PATTERN "%c%c%c%c %c%c%c%c"
+#define BYTE_TO_BINARY(byte)  \
+  ((byte) & 0x80 ? '1' : '0'), \
+  ((byte) & 0x40 ? '1' : '0'), \
+  ((byte) & 0x20 ? '1' : '0'), \
+  ((byte) & 0x10 ? '1' : '0'), \
+  ((byte) & 0x08 ? '1' : '0'), \
+  ((byte) & 0x04 ? '1' : '0'), \
+  ((byte) & 0x02 ? '1' : '0'), \
+  ((byte) & 0x01 ? '1' : '0')
+
+// ========================================================
 //                 NETWORK SETUP
 // ========================================================
 const char* ssid = "YP";
 const char* password = "ptyair101";
-const char* piHostname = "libsonpi"; // Your Pi's hostname (without .local)
+const char* piHostname = "libsonpi";
 const int udpPort = 4210;
 
 WiFiUDP udp;
-IPAddress resolvedPiIP; // Will store the IP found via mDNS
+IPAddress resolvedPiIP;
 
 // ========================================================
 //                 PACKET FRAMING
@@ -50,9 +64,9 @@ constexpr float MAG_SCALE_Z = 1.0f;
 //                  FLEX SENSOR SETUP
 // ========================================================
 constexpr int NUM_FLEX = 4;
-int flexPins[NUM_FLEX] = {A0, A1, A2, A3};
+int flexPins[NUM_FLEX] = {A0, A2, A1, A3};
 float R_FIXED[NUM_FLEX]  = {47000, 47000, 47000, 47000};
-float R_THRESH[NUM_FLEX] = {40000, 22000, 32000, 22000};
+float R_THRESH[NUM_FLEX] = {40000, 32000, 22000, 22000};
 constexpr float V_IN = 3.3;
 float flexR[NUM_FLEX];
 
@@ -67,7 +81,7 @@ Orientation ref{0,0,0};
 
 unsigned long lastTime = 0;
 unsigned long lastPrintTime = 0;
-constexpr unsigned long SEND_PERIOD_MS = 50; //20Hz 
+constexpr unsigned long SEND_PERIOD_MS = 50;
 
 // ========================================================
 //                      IMU LOGIC
@@ -83,12 +97,18 @@ void readIMU(Vec3 &acc, Vec3 &gyr, Vec3 &mag) {
     imu.getAGMT();
     acc = { imu.accX() * ACC_MG_TO_G, imu.accY() * ACC_MG_TO_G, imu.accZ() * ACC_MG_TO_G };
     gyr = { imu.gyrX() - GYRO_BIAS_DPS_X, imu.gyrY() - GYRO_BIAS_DPS_Y, imu.gyrZ() - GYRO_BIAS_DPS_Z };
-    mag = { (imu.magX() - MAG_OFF_X) * MAG_SCALE_X, (imu.magY() - MAG_OFF_Y) * MAG_SCALE_Y, (imu.magZ() - MAG_OFF_Z) * MAG_SCALE_Z };
+    mag = { (imu.magX() - MAG_OFF_X) * MAG_SCALE_X,
+            (imu.magY() - MAG_OFF_Y) * MAG_SCALE_Y,
+            (imu.magZ() - MAG_OFF_Z) * MAG_SCALE_Z };
   }
 }
 
 Orientation accelOrientation(const Vec3 &a) {
-  return { atan2(a.y, a.z) * RAD_TO_DEG, atan2(-a.x, sqrt(a.y*a.y + a.z*a.z)) * RAD_TO_DEG, 0.0f };
+  return {
+    atan2(a.y, a.z) * RAD_TO_DEG,
+    atan2(-a.x, sqrt(a.y*a.y + a.z*a.z)) * RAD_TO_DEG,
+    0.0f
+  };
 }
 
 float magYaw(const Vec3 &m, float roll, float pitch) {
@@ -123,7 +143,7 @@ uint8_t readFlexBits() {
     long sum = 0;
     for (int k = 0; k < 5; k++) sum += analogRead(flexPins[i]);
     float v = (sum / 5.0f) * (V_IN / 4095.0f);
-    flexR[i] = (v > 0.01) ? R_FIXED[i] * (v / (V_IN - v)) : 0;
+    flexR[i] = (v > 0.01f) ? R_FIXED[i] * (v / (V_IN - v)) : 0;
     if (flexR[i] > R_THRESH[i]) bits |= (1 << i);
   }
   return bits;
@@ -141,19 +161,14 @@ uint8_t encodeAxis(float angle, float th) {
 void setup() {
   Serial.begin(115200);
   Serial.println("Glove Starts");
-  unsigned long startWait = millis();
-  while (!Serial && millis() - startWait < 5000); 
-
-  Serial.println("\n--- Unified System Starting with mDNS ---");
 
   Wire.begin();
   Wire.setClock(400000);
 
   imu.begin(Wire, AD0_VAL);
   while (imu.status != ICM_20948_Stat_Ok) {
-    Serial.println("IMU init failed! tries again");
+    Serial.println("IMU init failed! Retrying...");
     imu.begin(Wire, AD0_VAL);
-
   }
 
   Vec3 acc, gyr, mag;
@@ -169,24 +184,12 @@ void setup() {
   }
   Serial.println("\nWiFi Connected!");
 
-  // Start mDNS discovery
-  if (!MDNS.begin("esp32-glove")) {
-    Serial.println("Error setting up mDNS responder!");
-  }
-
-  Serial.print("Resolving Raspberry Pi address for: ");
-  Serial.println(piHostname);
-  
-  // Try to find the Pi's IP (timeout 5 seconds)
+  MDNS.begin("esp32-glove");
   resolvedPiIP = MDNS.queryHost(piHostname);
   while (resolvedPiIP.toString() == "0.0.0.0") {
-    Serial.println("Pi IP not found, retrying...");
     delay(1000);
     resolvedPiIP = MDNS.queryHost(piHostname);
   }
-
-  Serial.print("Success! Pi IP: ");
-  Serial.println(resolvedPiIP);
 
   udp.begin(udpPort);
   lastTime = micros();
@@ -214,21 +217,17 @@ void loop() {
     uint8_t rollBits  = encodeAxis(relRoll,  ROLL_TH);
     uint8_t pitchBits = encodeAxis(relPitch, PITCH_TH);
 
-    uint8_t dataByte = (flexBits << 4) | (rollBits << 2) | (pitchBits);
-    
-    // Use the resolved IP instead of a hardcoded string
-    if (resolvedPiIP.toString() != "0.0.0.0") {
-      uint8_t buf[3] = { START_BYTE, dataByte, END_BYTE };
-      udp.beginPacket(resolvedPiIP, udpPort);
-      udp.write(buf, sizeof(buf));
-      udp.endPacket();
+    uint8_t dataByte = (flexBits << 4) | (rollBits << 2) | pitchBits;
 
-      Serial.print("DATA=0b: ");  Serial.println(buf[1], BIN);
+    uint8_t buf[3] = { START_BYTE, dataByte, END_BYTE };
 
-    }
+    udp.beginPacket(resolvedPiIP, udpPort);
+    udp.write(buf, sizeof(buf));
+    udp.endPacket();
 
-    // Serial.print("Roll:"); Serial.print(relRoll, 1);
-    // Serial.print(" Pitch:"); Serial.print(relPitch, 1);
-    // Serial.print(" FlexBits:"); Serial.println(flexBits, BIN);
+    // ===== FULL BYTE PRINT (NICE) =====
+    Serial.print("DATA = 0b ");
+    Serial.printf(BYTE_TO_BINARY_PATTERN, BYTE_TO_BINARY(buf[1]));
+    Serial.println();
   }
 }
