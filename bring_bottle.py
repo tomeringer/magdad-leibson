@@ -5,6 +5,7 @@ import os
 os.environ['PIGPIO_ADDR'] = 'localhost'
 
 import time
+from datetime import datetime
 import math
 import pickle
 from typing import Optional
@@ -123,8 +124,8 @@ def stop_drive():
     RIGHT_RPWM.value = RIGHT_LPWM.value = LEFT_RPWM.value = LEFT_LPWM.value = 0.0
 
 
-def drive_forward():
-    RIGHT_RPWM.value, LEFT_RPWM.value = 0.51, 0.50
+def drive_forward(speed: float = 0.5):
+    RIGHT_RPWM.value, LEFT_RPWM.value = speed + 0.01, speed
     RIGHT_LPWM.value, LEFT_LPWM.value = 0.0, 0.0
 
 
@@ -320,8 +321,11 @@ def detect_bottle_once():
 
             if disparity and disparity > 0:
                 # Standard: calculate_3d_coords returns X,Y,Z in the units implied by calibration T
-                X, Y, Z = calculate_3d_coords(disparity, cx, cy, _Q)
-
+                R = 0
+                X, Y, R = calculate_3d_coords(disparity, cx, cy, _Q)
+                # Z =  math.sqrt(R**2 - X**2 - Y**2)
+                Z = R
+                
     t_proc = time.perf_counter() - t0
     return {
         "found": X is not None,
@@ -331,6 +335,75 @@ def detect_bottle_once():
         "conf": conf,
         "t_proc": t_proc
     }
+
+
+def bring_bottle():
+    V = 96  # Forward speed cm/s
+    while True:
+        found_bottle = detect_bottle_once()
+        if found_bottle["found"]:
+            print(f"Bottle at X={found_bottle['X']:.2f}, Y={found_bottle['Y']:.2f}, Z={found_bottle['Z']:.2f}")
+            original_z = found_bottle['Z']
+            break
+        else:
+            print("No bottle detected.")
+    
+    servo_move_step(1)
+    drive_forward()
+    time.sleep(found_bottle["Z"]/(V*0.5))  
+    stop_drive()
+    print("Arrived at bottle location.")
+    time.sleep(1)
+    servo_move_step(0)
+    time.sleep(1)
+    drive_reverse()
+    time.sleep(original_z/(V*0.5))
+    stop_drive()
+
+
+
+def bring_bottle_advanced():
+    V = 96  # Forward speed cm/s
+    while True:
+        found_bottle = detect_bottle_once()
+        if found_bottle["found"]:
+            print(f"Bottle at X={found_bottle['X']:.2f}, Y={found_bottle['Y']:.2f}, Z={found_bottle['Z']:.2f}")
+            original_z = found_bottle['Z']
+            break
+        else:
+            print("No bottle detected.")
+
+    drive_forward(0.2)
+    # start_time = datetime.now().time()
+    # start_time_seconds = start_time.hour*3600+start_time.minute*60+start_time.second
+    while found_bottle["Z"] > 30.0:
+        found_bottle = detect_bottle_once()
+        if found_bottle["found"]:
+            print(f"Bottle at X={found_bottle['X']:.2f}, Y={found_bottle['Y']:.2f}, Z={found_bottle['Z']:.2f}, Time={datetime.now().time()}")
+        else:
+            print("Lost bottle during approach.")
+            stop_drive()
+            return
+    # Arrived 10cm from bottle bottle
+    stop_drive()
+    found_bottle = detect_bottle_once()
+    servo_move_step(1)  
+    drive_forward(0.2)
+    time.sleep(found_bottle["Z"]/(V*0.2))  
+    stop_drive()
+    print("Arrived at bottle location.")
+    time.sleep(1)
+    servo_move_step(0)
+    time.sleep(1)
+    drive_reverse()
+    time.sleep(original_z/(V*0.5))
+    stop_drive()
+
+
+def drive_2_seconds_forward():
+    drive_forward()
+    time.sleep(4)
+    stop_drive()
 
 
 def shutdown_vision():
@@ -412,16 +485,26 @@ def run_keyboard_loop():
                 servo_move_step(0)
 
             elif c == 'u':
-                print("[STEPPER] +200", flush=True)
-                _stepper.move(200, 1)
+                print("[STEPPER] +50", flush=True)
+                _stepper.move(50, 1)
 
             elif c == 'j':
-                print("[STEPPER] -200", flush=True)
-                _stepper.move(200, -1)
+                print("[STEPPER] -50", flush=True)
+                _stepper.move(50, -1)
+
             elif c == 'c':
                 print("[VISION] Detecting bottle (one-shot)...", flush=True)
                 res = detect_bottle_once()
                 print("[VISION] result:", res, flush=True)
+
+            elif c == 'b':
+                print("[VISION] Starting continuous bottle detection. Ctrl-C to stop.", flush=True)
+                bring_bottle()
+                print("[VISION] Finished bring_bottle.", flush=True)
+            
+            elif c == 'f':
+                print("[DRIVE] Driving forward for 2 seconds.", flush=True)
+                drive_2_seconds_forward()
 
             else:
                 print("[INFO] Unknown command. Use w/s/a/d/x/i/k/u/j/c/q", flush=True)
