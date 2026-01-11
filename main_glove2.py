@@ -250,24 +250,38 @@ def handle_payload(payload: int):
 def run_glove_loop():
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind((UDP_LISTEN_IP, UDP_PORT))
-    sock.settimeout(0.1)
+    sock.setblocking(False)  # non-blocking so we can drain the buffer
 
     print(f"[RUNNING] Glove Receiver + Async Ultrasonic on UDP {UDP_PORT}")
 
     last_rx = time.time()
+
     while True:
         ultrasonic_tick()
 
-        try:
-            data, _ = sock.recvfrom(1024)
+        latest_payload = None
+
+        # Drain all queued packets; keep only the newest valid one
+        while True:
+            try:
+                data, _ = sock.recvfrom(1024)
+            except BlockingIOError:
+                break  # no more packets waiting
+
             if len(data) >= 3 and data[0] == FRAME_START and data[2] == FRAME_END:
-                handle_payload(data[1])
+                latest_payload = data[1]
                 last_rx = time.time()
-        except socket.timeout:
-            if time.time() - last_rx > SILENCE_STOP_SEC:
-                RIGHT_RPWM.value = RIGHT_LPWM.value = LEFT_RPWM.value = LEFT_LPWM.value = 0.0
+
+        # Act once per loop, using only the newest payload
+        if latest_payload is not None:
+            handle_payload(latest_payload)
+
+        # Safety stop if glove is silent
+        if time.time() - last_rx > SILENCE_STOP_SEC:
+            RIGHT_RPWM.value = RIGHT_LPWM.value = LEFT_RPWM.value = LEFT_LPWM.value = 0.0
 
         time.sleep(CONTROL_PERIOD_SEC)
+
 
 
 # ============================================================
