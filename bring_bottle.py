@@ -338,7 +338,7 @@ def detect_bottle_once():
 
 
 def bring_bottle():
-    V = 90  # Forward speed cm/s
+    V = 96  # Forward speed cm/s
     time.sleep(3)
     while True:
         found_bottle = detect_bottle_once()
@@ -355,7 +355,7 @@ def bring_bottle():
         stop_drive()
         print("Approached bottle.")
 
-        time.sleep(3)   
+        time.sleep(5)   
         while True:
             found_bottle = detect_bottle_once()
             if found_bottle["found"]:
