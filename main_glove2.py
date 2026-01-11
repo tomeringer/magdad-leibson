@@ -144,6 +144,8 @@ class StepperMotor:
     def __init__(self, pins):
         self.pins = pins
         self.pi = pigpio.pi()
+        if not self.pi.connected:
+            raise RuntimeError("pigpio daemon not running. Run: sudo systemctl start pigpiod")
         self.seq = [
             [1, 0, 1, 0],
             [0, 1, 1, 0],
@@ -162,6 +164,7 @@ class StepperMotor:
                 time.sleep(step_delay)
         for p in self.pins:
             self.pi.write(p, 0)
+_stepper = StepperMotor([23, 22, 27, 17])
 
 # ============================================================
 # PAYLOAD HANDLER (UNCHANGED LOGIC)
