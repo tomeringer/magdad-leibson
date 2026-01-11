@@ -143,7 +143,7 @@ if __name__ == '__main__':
         exit()
 
     # ================= ZERO MQ PUBLISHER =================
-    ZMQ_ADDR = "tcp://*:5555"
+    ZMQ_ADDR = "tcp://127.0.0.1:5555"
     ctx = zmq.Context.instance()
     pub = ctx.socket(zmq.PUB)
     pub.setsockopt(zmq.SNDHWM, 1)  # no backlog
