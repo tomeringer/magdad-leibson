@@ -370,7 +370,7 @@ def bring_bottle():
         stop_drive()
         print("Approached bottle.")
 
-        time.sleep()   
+        time.sleep(2)   
         while True:
             found_bottle = detect_bottle_once()
             if found_bottle["found"]:
