@@ -46,6 +46,95 @@ YOLO_CONF = 0.50
 # Epipolar match tolerance in rectified images
 MATCH_Y_TOL = 10
 
+class YellowJacketEncoder:
+    """
+    goBILDA Yellow Jacket encoder
+    Spec used directly:
+        384.5 PPR at OUTPUT SHAFT
+        Quadrature decoding -> x4
+    """
+
+    # Quadrature transition table
+    _TRANS = {
+        0b0001: +1, 0b0010: -1,
+        0b0100: -1, 0b0111: +1,
+        0b1000: +1, 0b1011: -1,
+        0b1101: -1, 0b1110: +1,
+    }
+
+    def __init__(self, pi, gpio_a, gpio_b):
+        self.pi = pi
+        self.gpio_a = gpio_a
+        self.gpio_b = gpio_b
+
+        # ===== SITE SPEC (USED DIRECTLY) =====
+        self.ppr_output = 384.5 * (100 / 106)
+        self.counts_per_rev_output = self.ppr_output  # 1538 counts/rev
+
+        self.counts = 0
+        self._last_state = 0
+        self._t_last = time.time()
+        self._c_last = 0
+        self._output_rpm = 0.0
+
+        for g in (gpio_a, gpio_b):
+            self.pi.set_mode(g, pigpio.INPUT)
+            self.pi.set_pull_up_down(g, pigpio.PUD_UP)
+
+        a = self.pi.read(gpio_a)
+        b = self.pi.read(gpio_b)
+        self._last_state = (a << 1) | b
+
+        self._cba = self.pi.callback(gpio_a, pigpio.EITHER_EDGE, self._cb)
+        self._cbb = self.pi.callback(gpio_b, pigpio.EITHER_EDGE, self._cb)
+
+    def _cb(self, gpio, level, tick):
+        a = self.pi.read(self.gpio_a)
+        b = self.pi.read(self.gpio_b)
+        new_state = (a << 1) | b
+        key = (self._last_state << 2) | new_state
+        self.counts += self._TRANS.get(key, 0)
+        self._last_state = new_state
+
+    def update(self, window_s=0.2):
+        t = time.time()
+        dt = t - self._t_last
+        if dt < window_s:
+            return
+
+        dc = self.counts - self._c_last
+        rps = (dc / self.counts_per_rev_output) / dt
+        self._output_rpm = 60.0 * rps
+
+        self._t_last = t
+        self._c_last = self.counts
+
+    # ===== Public API =====
+    def output_revolutions(self):
+        return self.counts / self.counts_per_rev_output
+
+    def output_rpm(self):
+        return self._output_rpm
+
+    def output_degrees(self):
+        return self.output_revolutions() * 360.0
+
+    def zero(self):
+        self.counts = 0
+        self._c_last = 0
+        self._t_last = time.time()
+        self._output_rpm = 0.0
+
+    def stop(self):
+        self._cba.cancel()
+        self._cbb.cancel()
+
+
+ENC_A = 24  # free
+ENC_B = 25  # free
+pi = pigpio.pi()
+enc = YellowJacketEncoder(pi, ENC_A, ENC_B)
+
 # ============================================================
 # ULTRASONIC SENSOR
 # ============================================================
@@ -134,13 +223,13 @@ def drive_reverse():
     RIGHT_RPWM.value, LEFT_RPWM.value = 0.0, 0.0
 
 
-def turn_right():
-    RIGHT_LPWM.value, LEFT_RPWM.value = 0.51, 0.50
+def turn_right(speed: float = 0.5):
+    RIGHT_LPWM.value, LEFT_RPWM.value = speed + 0.01, speed
     RIGHT_RPWM.value, LEFT_LPWM.value = 0.0, 0.0
 
 
-def turn_left():
-    RIGHT_RPWM.value, LEFT_LPWM.value = 0.51, 0.50
+def turn_left(speed: float = 0.5):
+    RIGHT_RPWM.value, LEFT_LPWM.value = speed + 0.01, speed
     RIGHT_LPWM.value, LEFT_RPWM.value = 0.0, 0.0
 
 
@@ -272,6 +361,19 @@ def init_vision():
     _vision_ready = True
     print("[VISION] Ready.", flush=True)
 
+def read_latest_stereo(cap_l, cap_r, flush_n=10):
+    """
+    Flush old frames from both cameras and return the latest pair.
+    """
+    for _ in range(flush_n):
+        cap_l.grab()
+        cap_r.grab()
+
+    ret_l, frame_l = cap_l.retrieve()
+    ret_r, frame_r = cap_r.retrieve()
+
+    return ret_l, frame_l, ret_r, frame_r
+
 
 def detect_bottle_once():
     """
@@ -282,8 +384,10 @@ def detect_bottle_once():
 
     t0 = time.perf_counter()
 
-    ret_l, frame_l_orig = _cap_l.read()
-    ret_r, frame_r_orig = _cap_r.read()
+    ret_l, frame_l_orig, ret_r, frame_r_orig = read_latest_stereo(
+        _cap_l, _cap_r, flush_n=5
+    )
+
     if not ret_l or not ret_r:
         return {"found": False, "err": "Failed to read frames", "t_proc": time.perf_counter() - t0}
 
@@ -325,6 +429,12 @@ def detect_bottle_once():
                 X, Y, R = calculate_3d_coords(disparity, cx, cy, _Q)
                 # Z =  math.sqrt(R**2 - X**2 - Y**2)
                 Z = R
+
+                alpha = math.atan2(X, Z)
+                r = math.hypot(X, Z)
+                alpha = alpha + math.radians(3)
+                X = math.sin(alpha) * r
+                Z = math.cos(alpha) * r
                 
     t_proc = time.perf_counter() - t0
     return {
@@ -336,11 +446,45 @@ def detect_bottle_once():
         "t_proc": t_proc
     }
 
+def drive_distance(d_cm, forward: bool):
+    enc.zero()
+    enc.update()
+    d_cm = d_cm - 1
+    if forward:
+        drive_forward()
+    else:
+        drive_reverse()
+    while abs(enc.output_revolutions())*(math.pi*7.2) < d_cm:
+        print("Distance traveled: " + str(enc.output_revolutions()*(math.pi*7.2)))
+        time.sleep(0.01)
+        enc.update()
+    stop_drive()
+
+def turn_angle(theta_rad, left_turn: bool):
+    theta_rad = theta_rad - math.radians(5)
+    print(theta_rad)
+    enc.zero()
+    enc.update()
+    radius = 39.0/2.0
+    segment = radius * abs(theta_rad)
+    if left_turn:
+        turn_left(0.4)
+    else:
+        turn_right(0.4)
+    while abs(enc.output_revolutions())*(math.pi*7.2) < segment:
+        print("Distance traveled: " + str(enc.output_revolutions()*(math.pi*7.2)))
+        time.sleep(0.01)
+        enc.update()
+    stop_drive()
+
 
 def bring_bottle():
-    V = 90  # Forward speed cm/s
     time.sleep(3)
+    t0 = time.perf_counter()
     while True:
+        now = time.perf_counter()
+        if now - t0 > 10:
+            break
         found_bottle = detect_bottle_once()
         if found_bottle["found"]:
             print(f"Bottle at X={found_bottle['X']:.2f}, Y={found_bottle['Y']:.2f}, Z={found_bottle['Z']:.2f}")
@@ -349,75 +493,57 @@ def bring_bottle():
         else:
             print("No bottle detected.")
             
-    if found_bottle["Z"] > 45:
-        drive_forward()
-        time.sleep((found_bottle["Z"]-35)/(V*0.5))
-        stop_drive()
+    if found_bottle["Z"] > 80:
+        drive_distance(found_bottle["Z"]-35, True)
         print("Approached bottle.")
 
-        time.sleep(3)   
+        time.sleep(2)
+        t0 = time.perf_counter()
         while True:
             found_bottle = detect_bottle_once()
+            now = time.perf_counter()
+            if now - t0 > 10:
+                break
             if found_bottle["found"]:
                 print(f"Bottle at X={found_bottle['X']:.2f}, Y={found_bottle['Y']:.2f}, Z={found_bottle['Z']:.2f}")
                 break
             else:
-                print("No bottle detected.")
+                print("Lost bottle :(")
 
-    drive_forward()
-    time.sleep(found_bottle["Z"]/(V*0.5))
+    drive_distance(found_bottle["Z"], True)
     print("Arrived at bottle location.")
     time.sleep(1)
     servo_move_step(0)
     time.sleep(1)
-    drive_reverse()
-    time.sleep(original_z/(V*0.5))
-    stop_drive()
+    drive_distance(original_z, False)
 
 
 def bring_bottle_xz():
-    V = 90  # Forward speed cm/s
     time.sleep(3)
     z0 = 22
-    d = 39
-    wheel_dist = None
+    t0 = time.perf_counter()
     while True:
         found_bottle = detect_bottle_once()
+        now = time.perf_counter()
+        if now - t0 > 10:
+            break
         if found_bottle["found"]:
             print(f"Bottle at X={found_bottle['X']:.2f}, Y={found_bottle['Y']:.2f}, Z={found_bottle['Z']:.2f}")
             original_z = found_bottle['Z']
             new_z = z0 + original_z
             alpha = math.atan2(found_bottle['X'], new_z)
-            wheel_dist = alpha * d/2
             break
         else:
             print("No bottle detected.")
-    
-    turn_time = abs(wheel_dist)/(V*0.5)
-    if wheel_dist > 0:
-        turn_left()
-    else:
-        turn_right()
-    time.sleep(turn_time)
-    stop_drive()
+
+    turn_angle(alpha, alpha < 0)
     print("Completed turn towards bottle.")
-    drive_forward()
-    time.sleep(math.hypot(found_bottle["Z"], found_bottle["X"])/(V*0.5))  
-    stop_drive()
+    drive_distance(math.hypot(found_bottle["Z"], found_bottle["X"]), True)
     print("Arrived at bottle location.")
     time.sleep(1)
     servo_move_step(0)
     time.sleep(1)
-    drive_reverse()
-    time.sleep(math.hypot(found_bottle["Z"], found_bottle["X"])/(V*0.5))
-    stop_drive()
-
-
-def drive_2_seconds_forward():
-    drive_forward()
-    time.sleep(4)
-    stop_drive()
-
+    drive_distance(math.hypot(found_bottle["Z"], found_bottle["X"]), False)
 
 def shutdown_vision():
     global _cap_l, _cap_r
@@ -428,6 +554,13 @@ def shutdown_vision():
             _cap_r.release()
     except Exception:
         pass
+
+
+def drive_2_seconds_forward():
+    drive_forward()
+    time.sleep(2)
+    stop_drive()
+
 
 
 # ============================================================
@@ -514,10 +647,24 @@ def run_keyboard_loop():
                 print("[VISION] Starting continuous bottle detection. Ctrl-C to stop.", flush=True)
                 bring_bottle()
                 print("[VISION] Finished bring_bottle.", flush=True)
-            
+
+            elif c == 'e':
+                print("[VISION] Starting continuous bottle detection. Ctrl-C to stop.", flush=True)
+                bring_bottle_xz()
+                print("[VISION] Finished bring_bottle.", flush=True)
+
+            elif c == 'y':
+                print("[VISION] Starting continuous bottle detection. Ctrl-C to stop.", flush=True)
+                bring_bottle_yxz()
+                print("[VISION] Finished bring_bottle.", flush=True)
+
             elif c == 'f':
-                print("[DRIVE] Driving forward for 2 seconds.", flush=True)
+                print("[DRIVE] Driving forward 2 seconds.", flush=True)
                 drive_2_seconds_forward()
+                print("[DRIVE] Finished 2 seconds forward.", flush=True)
+
+            elif c == 't':
+                turn_angle(np.pi*2, True)
 
             else:
                 print("[INFO] Unknown command. Use w/s/a/d/x/i/k/u/j/c/q", flush=True)

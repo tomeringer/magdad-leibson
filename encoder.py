@@ -1,0 +1,115 @@
+import time
+import pigpio
+
+class YellowJacketEncoder:
+    """
+    goBILDA Yellow Jacket encoder
+    Spec used directly:
+        384.5 PPR at OUTPUT SHAFT
+        Quadrature decoding -> x4
+    """
+
+    # Quadrature transition table
+    _TRANS = {
+        0b0001: +1, 0b0010: -1,
+        0b0100: -1, 0b0111: +1,
+        0b1000: +1, 0b1011: -1,
+        0b1101: -1, 0b1110: +1,
+    }
+
+    def __init__(self, pi, gpio_a, gpio_b):
+        self.pi = pi
+        self.gpio_a = gpio_a
+        self.gpio_b = gpio_b
+
+        # ===== SITE SPEC (USED DIRECTLY) =====
+        self.ppr_output = 384.5
+        self.counts_per_rev_output = self.ppr_output * 4  # 1538 counts/rev
+
+        self.counts = 0
+        self._last_state = 0
+        self._t_last = time.time()
+        self._c_last = 0
+        self._output_rpm = 0.0
+
+        for g in (gpio_a, gpio_b):
+            self.pi.set_mode(g, pigpio.INPUT)
+            self.pi.set_pull_up_down(g, pigpio.PUD_UP)
+
+        a = self.pi.read(gpio_a)
+        b = self.pi.read(gpio_b)
+        self._last_state = (a << 1) | b
+
+        self._cba = self.pi.callback(gpio_a, pigpio.EITHER_EDGE, self._cb)
+        self._cbb = self.pi.callback(gpio_b, pigpio.EITHER_EDGE, self._cb)
+
+    def _cb(self, gpio, level, tick):
+        a = self.pi.read(self.gpio_a)
+        b = self.pi.read(self.gpio_b)
+        new_state = (a << 1) | b
+        key = (self._last_state << 2) | new_state
+        self.counts += self._TRANS.get(key, 0)
+        self._last_state = new_state
+
+    def update(self, window_s=0.2):
+        t = time.time()
+        dt = t - self._t_last
+        if dt < window_s:
+            return
+
+        dc = self.counts - self._c_last
+        rps = (dc / self.counts_per_rev_output) / dt
+        self._output_rpm = 60.0 * rps
+
+        self._t_last = t
+        self._c_last = self.counts
+
+    # ===== Public API =====
+    def output_revolutions(self):
+        return self.counts / self.counts_per_rev_output
+
+    def output_rpm(self):
+        return self._output_rpm
+
+    def output_degrees(self):
+        return self.output_revolutions() * 360.0
+
+    def zero(self):
+        self.counts = 0
+        self._c_last = 0
+        self._t_last = time.time()
+        self._output_rpm = 0.0
+
+    def stop(self):
+        self._cba.cancel()
+        self._cbb.cancel()
+
+def main():
+    ENC_A = 24  # free
+    ENC_B = 25  # free
+
+    pi = pigpio.pi()
+    if not pi.connected:
+        raise RuntimeError("pigpio daemon not running")
+
+    enc = YellowJacketEncoder(pi, ENC_A, ENC_B)
+
+    try:
+        while True:
+            enc.update()
+            print(
+                f"counts={enc.counts:7d} | "
+                f"motor RPM={enc.motor_rpm():7.2f} | "
+                f"output RPM={enc.output_rpm():6.2f} | "
+                f"output angle={enc.output_degrees():8.2f}°"
+            )
+            time.sleep(0.05)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        enc.stop()
+        pi.stop()
+
+
+if __name__ == "__main__":
+    main()

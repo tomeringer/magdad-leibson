@@ -26,15 +26,24 @@ SILENCE_STOP_SEC = 0.7
 
 factory = PiGPIOFactory()
 
-STEPPER_CHUNK = 200
+# ---- Stepper "continuous feel" ----
+STEPPER_CHUNK = 4                 # keep small so stop feels immediate
+STEPPER_STEP_DELAY_SEC = 0.0015   # was 0.0015
+STEPPER_TICK_SEC = 0.05           # glove sends every 50ms -> match it
+_last_stepper_cmd_t = 0.0
+
+# ---- Stepper command freshness gate (Choice #1) ----
+STEP_CMD_STALE_SEC = 0.12         # if no valid packets for this long -> stop stepper immediately
+_stepper_dir = 0                  # -1, 0, +1 (desired direction while held)
+_last_pkt_t = 0.0                 # last time we received a valid framed packet
 
 # ============================================================
-# GLOBAL STATE
+# GLOBAL STATE (edge-detected)
 # ============================================================
-prev_f0 = prev_f1 = prev_f2 = prev_f3 = 0
+prev_f0 = prev_f1 = 0
 
 # ============================================================
-# ULTRASONIC SENSORS (ASYNC â€“ FROM FIRST CODE)
+# ULTRASONIC SENSORS (ASYNC)
 # ============================================================
 US1_TRIG, US1_ECHO = 5, 6
 US2_TRIG, US2_ECHO = 13, 19
@@ -96,6 +105,13 @@ def obstacle_too_close() -> bool:
 
 
 # ============================================================
+# Bring_Bottle
+# ============================================================
+def bring_bottle():
+    pass
+
+
+# ============================================================
 # SERVO
 # ============================================================
 SERVO_PIN = 12
@@ -128,7 +144,7 @@ def servo_move_step(direction: int):
 
 
 # ============================================================
-# DC & STEPPER MOTORS
+# DC MOTORS
 # ============================================================
 RIGHT_RPWM = PWMOutputDevice(2, frequency=1000, initial_value=0, pin_factory=factory)
 RIGHT_LPWM = PWMOutputDevice(3, frequency=1000, initial_value=0, pin_factory=factory)
@@ -136,6 +152,13 @@ LEFT_RPWM  = PWMOutputDevice(20, frequency=1000, initial_value=0, pin_factory=fa
 LEFT_LPWM  = PWMOutputDevice(21, frequency=1000, initial_value=0, pin_factory=factory)
 
 
+def stop_dc():
+    RIGHT_RPWM.value = RIGHT_LPWM.value = LEFT_RPWM.value = LEFT_LPWM.value = 0.0
+
+
+# ============================================================
+# STEPPER MOTOR
+# ============================================================
 class StepperMotor:
     def __init__(self, pins):
         self.pins = pins
@@ -148,26 +171,60 @@ class StepperMotor:
         ]
         for p in self.pins:
             self.pi.set_mode(p, pigpio.OUTPUT)
+            self.pi.write(p, 0)
 
-    def move(self, steps, direction=1):
-        for _ in range(int(steps)):
+    def step_chunk(self, steps: int, direction: int = 1, delay_sec: float = 0.002):
+        steps = int(max(0, steps))
+        direction = 1 if direction >= 0 else -1
+
+        for _ in range(steps):
             for step in range(4):
                 idx = step if direction == 1 else 3 - step
                 for i, p in enumerate(self.pins):
                     self.pi.write(p, self.seq[idx][i])
-                time.sleep(0.005)
+                time.sleep(delay_sec)
+
+        # de-energize between chunks
+        self.deenergize()
+
+    def deenergize(self):
         for p in self.pins:
             self.pi.write(p, 0)
+
+    def close(self):
+        self.deenergize()
+        try:
+            self.pi.stop()
+        except Exception:
+            pass
 
 
 _stepper = StepperMotor([23, 22, 27, 17])
 
 
+def stepper_tick(direction: int):
+    global _last_stepper_cmd_t
+    now = time.time()
+    if now - _last_stepper_cmd_t >= STEPPER_TICK_SEC:
+        _last_stepper_cmd_t = now
+        _stepper.step_chunk(STEPPER_CHUNK, direction=direction, delay_sec=STEPPER_STEP_DELAY_SEC)
+
+
 # ============================================================
-# PAYLOAD HANDLER (UNCHANGED LOGIC)
+# PAYLOAD HANDLER (MATCHES YOUR ESP32 PACKET ENCODING)
+#   dataByte = (flexBits<<4) | (rollBits<<2) | pitchBits
+#
+#   flexPins order on ESP32: {A0, A2, A1, A3}
+#   so:
+#     f0 -> bit0 -> A0
+#     f1 -> bit1 -> A2
+#     f2 -> bit2 -> A1
+#     f3 -> bit3 -> A3
 # ============================================================
 def handle_payload(payload: int):
-    global prev_f0, prev_f1, prev_f2, prev_f3
+    global prev_f0, prev_f1, prev_f2, prev_f3, _stepper_dir, _last_pkt_t
+
+    _last_pkt_t = time.time()  # refresh stepper-command validity on every valid packet
 
     flex = (payload >> 4) & 0x0F
     roll_code = (payload >> 2) & 0x03
@@ -177,66 +234,134 @@ def handle_payload(payload: int):
     f1 = (flex >> 1) & 1
     f2 = (flex >> 2) & 1
     f3 = (flex >> 3) & 1
-
-    if f0 == 1 and prev_f0 == 0:
-        print("[EVENT] Finger 0 pressed -> Closing Servo")
+    
+    # ------------------------------------------------------------
+    # Special combo: all fingers pressed -> bring bottle
+    # ------------------------------------------------------------
+    if f0 == 1 and f1 == 1 and f2 == 1 and f3 == 1:
+        bring_bottle()
+        prev_f0, prev_f1, prev_f2, prev_f3 = f0, f1, f2, f3
+        return
+    
+    # ------------------------------------------------------------
+    # Servo edge detection (now: f3=close, f2=open)
+    # ------------------------------------------------------------
+    if f3 == 1 and prev_f3 == 0:
+        print("[EVENT] Finger 3 (A3) pressed -> Closing Servo")
         servo_move_step(1)
 
-    if f1 == 1 and prev_f1 == 0:
-        print("[EVENT] Finger 1 pressed -> Opening Servo")
+    if f2 == 1 and prev_f2 == 0:
+        print("[EVENT] Finger 2 (A1) pressed -> Opening Servo")
         servo_move_step(0)
 
-    prev_f0, prev_f1 = f0, f1
+    # ------------------------------------------------------------
+    # Stepper "held" command (now: f0=down, f1=up)
+    #   Movement happens in main loop based on _stepper_dir
+    # ------------------------------------------------------------
+    if f0 == 1 and f1 == 0:
+        _stepper_dir = -1   # down
+    elif f1 == 1 and f0 == 0:
+        _stepper_dir = +1   # up
+    else:
+        _stepper_dir = 0
 
-    if f2 == 1 and prev_f2 == 0:
-        _stepper.move(STEPPER_CHUNK, 1)
-    if f3 == 1 and prev_f3 == 0:
-        _stepper.move(STEPPER_CHUNK, -1)
+    # update previous states for edge detection
+    prev_f0, prev_f1, prev_f2, prev_f3 = f0, f1, f2, f3
 
-    prev_f2, prev_f3 = f2, f3
 
+    # DC motors (unchanged logic)
     too_close = obstacle_too_close()
 
     if pitch_code == 0b01 and not too_close:
+        # Move backward (both DC motors backward). Slight bias (0.51 vs 0.50) to help correct drift.
         RIGHT_RPWM.value, LEFT_RPWM.value = 0.51, 0.50
         RIGHT_LPWM.value = LEFT_LPWM.value = 0.0
+
     elif pitch_code == 0b10:
+        # Move forward (both DC motors forward). Slight bias (0.51 vs 0.50) to help correct drift.
         RIGHT_LPWM.value, LEFT_LPWM.value = 0.51, 0.50
         RIGHT_RPWM.value = LEFT_RPWM.value = 0.0
+
     elif roll_code == 0b01 and not too_close:
-        RIGHT_LPWM.value, LEFT_RPWM.value = 0.51, 0.50
-        RIGHT_RPWM.value = LEFT_LPWM.value = 0.0
-    elif roll_code == 0b10 and not too_close:
+        # Turn left in place (right motor backward, left motor forward) -> rotates counter-clockwise.
         RIGHT_RPWM.value, LEFT_LPWM.value = 0.51, 0.50
         RIGHT_LPWM.value = LEFT_RPWM.value = 0.0
+
+    elif roll_code == 0b10 and not too_close:
+        # Turn right in place (right motor forward, left motor backward) -> rotates clockwise.
+        RIGHT_LPWM.value, LEFT_RPWM.value = 0.51, 0.50
+        RIGHT_RPWM.value = LEFT_LPWM.value = 0.0
+
     else:
-        RIGHT_RPWM.value = RIGHT_LPWM.value = LEFT_RPWM.value = LEFT_LPWM.value = 0.0
+        # Stop both DC motors.
+        stop_dc()
 
 
 # ============================================================
-# MAIN LOOP (UNCHANGED STRUCTURE)
+# MAIN LOOP
 # ============================================================
 def run_glove_loop():
+    global _stepper_dir, _last_pkt_t
+
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind((UDP_LISTEN_IP, UDP_PORT))
-    sock.settimeout(0.1)
+    sock.settimeout(0.02)  # faster silence detection
 
-    print(f"[RUNNING] Edge Detection Mode + Async Ultrasonic on Port {UDP_PORT}")
+    print(f"[RUNNING] Glove UDP + Async Ultrasonic on Port {UDP_PORT}")
 
     last_rx = time.time()
+    _last_pkt_t = time.time()  # initialize to "now" so we don't instantly stale-stop on startup
+
     while True:
         ultrasonic_tick()
 
+        # ----- Stepper freshness gate: if packets stop, stop stepper immediately -----
+        now = time.time()
+        if now - _last_pkt_t > STEP_CMD_STALE_SEC:
+            if _stepper_dir != 0:
+                _stepper_dir = 0
+                _stepper.deenergize()  # immediate stop (drop coils)
+
+        # ----- Stepper continuous motion only while command is fresh -----
+        if _stepper_dir != 0:
+            stepper_tick(_stepper_dir)
+
+        # ----- UDP receive -----
         try:
             data, _ = sock.recvfrom(1024)
             if len(data) >= 3 and data[0] == FRAME_START and data[2] == FRAME_END:
                 handle_payload(data[1])
                 last_rx = time.time()
         except socket.timeout:
+            # Stop DC motors on long silence
             if time.time() - last_rx > SILENCE_STOP_SEC:
-                RIGHT_RPWM.value = RIGHT_LPWM.value = LEFT_RPWM.value = LEFT_LPWM.value = 0.0
+                stop_dc()
 
         time.sleep(CONTROL_PERIOD_SEC)
+
+
+# ============================================================
+# PIN MAPPING (Raspberry Pi, BCM numbering)
+#
+#   Usage                  BCM   Physical pin
+#   ------------------------------------------------
+#   Ultrasonic #1 TRIG      5    pin 29
+#   Ultrasonic #1 ECHO      6    pin 31
+#   Ultrasonic #2 TRIG     13    pin 33
+#   Ultrasonic #2 ECHO     19    pin 35
+#
+#   Servo signal           12    pin 32
+#
+#   Right DC motor RPWM     2    pin 3
+#   Right DC motor LPWM     3    pin 5
+#   Left  DC motor RPWM    20    pin 38
+#   Left  DC motor LPWM    21    pin 40
+#
+#   Stepper IN1            23    pin 16
+#   Stepper IN2            22    pin 15
+#   Stepper IN3            27    pin 13
+#   Stepper IN4            17    pin 11
+# ============================================================
 
 
 # ============================================================
@@ -249,5 +374,10 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         pass
     finally:
+        stop_dc()
+        try:
+            _stepper.close()
+        except Exception:
+            pass
         GPIO.cleanup()
         print("\n[OFF] System Stopped.")

@@ -29,7 +29,7 @@ factory = PiGPIOFactory()
 
 STEPPER_CHUNK = 200
 
-# משתנים לשמירת מצב קודם של האצבעות (לזיהוי שינוי מ-0 ל-1)
+# ?????? ?????? ??? ???? ?? ??????? (?????? ????? ?-0 ?-1)
 prev_f0 = 0
 prev_f1 = 0
 prev_f2 = 0
@@ -131,30 +131,30 @@ _stepper = StepperMotor([23, 22, 27, 17])
 def handle_payload(payload: int):
     global prev_f0, prev_f1, prev_f2, prev_f3, _last_distance_cm
 
-    # פענוח המידע
+    # ????? ?????
     flex = (payload >> 4) & 0x0F
     roll_code = (payload >> 2) & 0x03
     pitch_code = payload & 0x03
 
-    # מצב נוכחי של אצבעות
+    # ??? ????? ?? ??????
     f0 = (flex >> 0) & 1
     f1 = (flex >> 1) & 1
     f2 = (flex >> 2) & 1
     f3 = (flex >> 3) & 1
 
-    # --- לוגיקת סרוו (זיהוי מעבר מ-0 ל-1) ---
+    # --- ?????? ???? (????? ???? ?-0 ?-1) ---
     if f0 == 1 and prev_f0 == 0:
         print("[EVENT] Finger 0 pressed -> Closing Servo")
-        servo_move_step(1)  # כיוון אחד
+        servo_move_step(1)  # ????? ???
 
     if f1 == 1 and prev_f1 == 0:
         print("[EVENT] Finger 1 pressed -> Opening Servo")
-        servo_move_step(0)  # כיוון שני
+        servo_move_step(0)  # ????? ???
 
-    # עדכון מצב קודם לסבב הבא
+    # ????? ??? ???? ???? ???
     prev_f0, prev_f1 = f0, f1
 
-    # --- לוגיקת סטפר (זיהוי מעבר מ-0 ל-1) ---
+    # --- ?????? ???? (????? ???? ?-0 ?-1) ---
     if f2 == 1 and prev_f2 == 0:
         _stepper.move(STEPPER_CHUNK, 1)
     if f3 == 1 and prev_f3 == 0:
@@ -162,7 +162,7 @@ def handle_payload(payload: int):
 
     prev_f2, prev_f3 = f2, f3
 
-    # --- לוגיקת תנועה (DC Motors) ---
+    # --- ?????? ????? (DC Motors) ---
     _last_distance_cm = measure_distance_cm()
     too_close = (_last_distance_cm is not None and _last_distance_cm < ULTRA_STOP_CM)
 
