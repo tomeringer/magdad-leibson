@@ -165,17 +165,6 @@ servo = Servo(
     pin_factory=factory
 )
 
-# ===== Continuous-rotation servo control (non-blocking) =====
-SERVO_SPEED_OPEN  = +0.8   # <-- if direction is reversed, flip the sign
-SERVO_SPEED_CLOSE = -0.8   # <-- if direction is reversed, flip the sign
-SERVO_ACTION_SEC  = 0.35   # how long to run motor per command
-SERVO_COOLDOWN_SEC = 0.20  # ignore new commands until action finishes + cooldown
-
-servo_is_open = True       # logical state (start OPEN)
-_servo_drive_until = 0.0   # time when we should stop the servo
-_servo_busy_until  = 0.0   # time until which we ignore new servo commands
-
-
 # --- הגדרות תנועה ---
 MOVE_STEP = 0.39  # 70 מעלות עבור מנוע 360
 
@@ -218,47 +207,6 @@ def servo_move_step(direction):
 
     state_str = "OPEN" if servo_is_open else "CLOSED"
     print(f">> Servo moved to {current_pos:.2f} | state={state_str}")
-
-def servo_request(open_state: bool):
-    """
-    Continuous-rotation servo:
-    open_state=True  -> run at SERVO_SPEED_OPEN for SERVO_ACTION_SEC then stop
-    open_state=False -> run at SERVO_SPEED_CLOSE for SERVO_ACTION_SEC then stop
-    Ignores redundant commands and ignores commands while busy.
-    """
-    global servo_is_open, _servo_drive_until, _servo_busy_until
-
-    now = time.time()
-
-    # Lock-out while servo is in motion / cooldown
-    if now < _servo_busy_until:
-        return
-
-    # Ignore redundant commands
-    if open_state and servo_is_open:
-        return
-    if (not open_state) and (not servo_is_open):
-        return
-
-    speed = SERVO_SPEED_OPEN if open_state else SERVO_SPEED_CLOSE
-    servo.value = speed
-
-    _servo_drive_until = now + SERVO_ACTION_SEC
-    _servo_busy_until = _servo_drive_until + SERVO_COOLDOWN_SEC
-
-    servo_is_open = open_state
-    print(f">> Servo CMD: {'OPEN' if open_state else 'CLOSE'} | speed={speed:+.2f}")
-
-
-def servo_tick():
-    """Call often; stops the servo when the timed action is done."""
-    global _servo_drive_until
-    if _servo_drive_until == 0.0:
-        return
-    if time.time() >= _servo_drive_until:
-        servo.value = 0.0  # stop (neutral)
-        _servo_drive_until = 0.0
-        print(">> Servo STOP")
 
 
 # ============================================================
@@ -781,13 +729,13 @@ def handle_payload(payload: int):
     # ------------------------------------------------------------
     # Servo edge detection (now: f3=close, f2=open)
     # ------------------------------------------------------------
-    if f2 == 1 and prev_f2 == 0:
-        print("[EVENT] Finger 2 (A1) pressed -> Opening Servo")
-        servo_request(open_state=True)   # open
-
     if f3 == 1 and prev_f3 == 0:
         print("[EVENT] Finger 3 (A3) pressed -> Closing Servo")
-        servo_request(open_state=False)  # close
+        servo_move_step(1)
+
+    if f2 == 1 and prev_f2 == 0:
+        print("[EVENT] Finger 2 (A1) pressed -> Opening Servo")
+        servo_move_step(0)
 
     # ------------------------------------------------------------
     # Stepper "held" command (now: f0=down, f1=up)
@@ -895,7 +843,6 @@ def run_glove_loop():
 
     while True:
         ultrasonic_tick()
-        servo_tick()
 
         # ----- Stepper freshness gate: if packets stop, stop stepper immediately -----
         now = time.time()
