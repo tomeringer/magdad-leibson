@@ -92,7 +92,7 @@ def main():
     if not pi.connected:
         raise RuntimeError("pigpio daemon not running")
 
-    enc = YellowJacketEncoder(pi, ENC_A, ENC_B, gear_ratio=13.7)
+    enc = YellowJacketEncoder(pi, ENC_A, ENC_B)
 
     try:
         while True:
