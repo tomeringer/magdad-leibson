@@ -524,12 +524,9 @@ def bring_bottle_xz():
 
 
 def bring_bottle_yxz():
-    V = 90  # Forward speed cm/s
     time.sleep(3)
     z0 = 22
-    d = 39
     Y_PARAM = 15
-    wheel_dist = None
     while True:
         found_bottle = detect_bottle_once()
         if found_bottle["found"]:
@@ -545,7 +542,6 @@ def bring_bottle_yxz():
         found_bottle = detect_bottle_once()
         if found_bottle["found"]:
             print(f"Bottle at X={found_bottle['X']:.2f}, Y={found_bottle['Y']:.2f}, Z={found_bottle['Z']:.2f}")
-            original_z = found_bottle['Z']
             new_z = z0 + original_z
             alpha = math.atan2(found_bottle['X'], new_z)
             break
