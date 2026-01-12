@@ -729,14 +729,13 @@ def handle_payload(payload: int):
     # ------------------------------------------------------------
     # Servo edge detection (now: f3=close, f2=open)
     # ------------------------------------------------------------
-    if f3 == 1 and prev_f3 == 0:
-        print("[EVENT] Finger 3 (A3) pressed -> Closing Servo")
-        servo_move_step(1)
-
     if f2 == 1 and prev_f2 == 0:
         print("[EVENT] Finger 2 (A1) pressed -> Opening Servo")
         servo_move_step(0)
 
+    if f3 == 1 and prev_f3 == 0:
+        print("[EVENT] Finger 3 (A3) pressed -> Closing Servo")
+        servo_move_step(1)
     # ------------------------------------------------------------
     # Stepper "held" command (now: f0=down, f1=up)
     #   Movement happens in main loop based on _stepper_dir
