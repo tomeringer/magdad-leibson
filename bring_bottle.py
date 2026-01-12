@@ -223,13 +223,13 @@ def drive_reverse():
     RIGHT_RPWM.value, LEFT_RPWM.value = 0.0, 0.0
 
 
-def turn_right():
-    RIGHT_LPWM.value, LEFT_RPWM.value = 0.51, 0.50
+def turn_right(speed: float = 0.5):
+    RIGHT_LPWM.value, LEFT_RPWM.value = speed + 0.01, speed
     RIGHT_RPWM.value, LEFT_LPWM.value = 0.0, 0.0
 
 
-def turn_left():
-    RIGHT_RPWM.value, LEFT_LPWM.value = 0.51, 0.50
+def turn_left(speed: float = 0.5):
+    RIGHT_RPWM.value, LEFT_LPWM.value = speed + 0.01, speed
     RIGHT_LPWM.value, LEFT_RPWM.value = 0.0, 0.0
 
 
@@ -455,14 +455,16 @@ def drive_distance(d_cm, forward: bool):
 
 def turn_angle(theta_rad, left_turn: bool):
     print(theta_rad)
+    if not left_turn:
+        theta_rad = theta_rad - math.radians(4)
     enc.zero()
     enc.update()
     radius = 39.0/2.0
-    segment = radius * theta_rad
+    segment = radius * abs(theta_rad)
     if left_turn:
-        turn_left()
+        turn_left(0.4)
     else:
-        turn_right()
+        turn_right(0.4)
     while abs(enc.output_revolutions())*(math.pi*7.2) < segment:
         print("Distance traveled: " + str(enc.output_revolutions()*(math.pi*7.2)))
         time.sleep(0.01)
