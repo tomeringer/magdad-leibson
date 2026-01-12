@@ -454,6 +454,9 @@ def drive_distance(d_cm, forward: bool):
     stop_drive()
 
 def turn_angle(theta_rad, left_turn: bool):
+    print(theta_rad)
+    enc.zero()
+    enc.update()
     radius = 39.0/2.0
     segment = radius * theta_rad
     if left_turn:
