@@ -67,6 +67,7 @@ _last_stepper_cmd_t = 0.0
 STEP_CMD_STALE_SEC = 0.12         # if no valid packets for this long -> stop stepper immediately
 _stepper_dir = 0                  # -1, 0, +1 (desired direction while held)
 _last_pkt_t = 0.0                 # last time we received a valid framed packet
+sock = None
 
 # ============================================================
 # GLOBAL STATE (edge-detected)
@@ -545,7 +546,7 @@ def drive_distance(d_cm, forward: bool):
         drive_forward()
     else:
         drive_reverse()
-    while abs(enc.output_revolutions()) * (math.pi * 7.2) < d_cm:
+    while abs(enc.output_revolutions()) * (math.pi * 7.2) < d_cm and read_udp_xz():
         print("Distance traveled: " + str(enc.output_revolutions() * (math.pi * 7.2)))
         time.sleep(0.01)
         enc.update()
@@ -563,7 +564,7 @@ def turn_angle(theta_rad, left_turn: bool):
         turn_left(0.4)
     else:
         turn_right(0.4)
-    while abs(enc.output_revolutions()) * (math.pi * 7.2) < segment:
+    while abs(enc.output_revolutions()) * (math.pi * 7.2) < segment and read_udp_xz():
         print("Distance traveled: " + str(enc.output_revolutions() * (math.pi * 7.2)))
         time.sleep(0.01)
         enc.update()
@@ -741,6 +742,18 @@ def handle_payload(payload: int):
     # Stop both DC motors.
         stop_drive()
 
+def read_udp_xz():
+    try:
+        data, _ = sock.recvfrom(1024)
+        if len(data) >= 3 and data[0] == FRAME_START and data[2] == FRAME_END:
+            last_rx = time.time()
+            return handle_payload_xz(data[1])
+        return False
+    except socket.timeout:
+        # Stop DC motors on long silence
+        if time.time() - last_rx > SILENCE_STOP_SEC:
+            stop_drive()
+
 
 def handle_payload_xz(payload: int):
     pitch_code = payload & 0x03
@@ -755,7 +768,7 @@ def handle_payload_xz(payload: int):
 # MAIN LOOP
 # ============================================================
 def run_glove_loop():
-    global _stepper_dir, _last_pkt_t
+    global _stepper_dir, _last_pkt_t, sock
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind((UDP_LISTEN_IP, UDP_PORT))
