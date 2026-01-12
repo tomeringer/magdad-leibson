@@ -159,6 +159,13 @@ if __name__ == '__main__':
     stereo = LatestStereo(cap_l, cap_r).start()
     print("Starting YOLOv8 Stereo Detection (low latency, non-batched NCNN).")
 
+    # --- Tracking variables for template matching ---
+    last_x_l = None
+    last_y_l = None
+    last_X = last_Y = last_Z = None
+    frames_since_yolo = 0
+    YOLO_FREQ = 10  # run YOLO every 10 frames
+
     try:
         while True:
             t0 = time.perf_counter()
@@ -168,22 +175,34 @@ if __name__ == '__main__':
 
             tcap, frame_l_orig, frame_r_orig = pack
             frame_age_s = time.perf_counter() - tcap
-
             # Rectify
             frame_l_rect = cv2.remap(frame_l_orig, maps_l[0], maps_l[1], cv2.INTER_LINEAR)
             frame_r_rect = cv2.remap(frame_r_orig, maps_r[0], maps_r[1], cv2.INTER_LINEAR)
 
-            # YOLO left image
-            res_l = model.predict(frame_l_rect, conf=0.50, classes=[BOTTLE_CLASS_ID], verbose=False)[0]
-            box_l = pick_best_box(res_l)
+            # Decide whether to run YOLO
+            frames_since_yolo += 1
+            use_yolo = frames_since_yolo >= YOLO_FREQ or last_x_l is None
 
-            if box_l is not None:
-                print(f"Bottle detected with confidence {box_l.conf.item():.3f}")
-                x_l = float(box_l.xywh[0][0].item())
-                y_l = float(box_l.xywh[0][1].item())
+            if use_yolo:
+                # --- Run YOLO ---
+                res_l = model.predict(frame_l_rect, conf=0.50, classes=[BOTTLE_CLASS_ID], verbose=False)[0]
+                box_l = pick_best_box(res_l)
+
+                if box_l is not None:
+                    print(f"Bottle detected with confidence {box_l.conf.item():.3f}")
+                    x_l = float(box_l.xywh[0][0].item())
+                    y_l = float(box_l.xywh[0][1].item())
+                    last_x_l, last_y_l = x_l, y_l
+                    frames_since_yolo = 0
+                else:
+                    x_l, y_l = last_x_l, last_y_l
+            else:
+                # --- Template matching using last known location ---
+                x_l, y_l = last_x_l, last_y_l
+
+            # Proceed with epipolar band template matching
+            if x_l is not None and y_l is not None:
                 y = int(round(y_l))
-
-                # Epipolar band
                 band = 20
                 y0 = max(0, y - band)
                 y1 = min(H, y + band)
@@ -206,16 +225,15 @@ if __name__ == '__main__':
                 disparity = x_l - x_r
 
                 if abs(disparity) > 0.5:
-                    X, Y, Z = calculate_3d_coords(disparity, x_l, y_l, Q_matrix)
-                    print(f"X:{X:.1f}  Y:{Y:.1f}  Z:{Z:.1f}   (age {frame_age_s:.3f}s)")
+                    last_X, last_Y, last_Z = calculate_3d_coords(disparity, x_l, y_l, Q_matrix)
+                    print(f"X:{last_X:.1f}  Y:{last_Y:.1f}  Z:{last_Z:.1f}   (age {frame_age_s:.3f}s)")
                 else:
-                    X = Y = Z = None
+                    last_X = last_Y = last_Z = None
             else:
-                X = Y = Z = None
-                print(f"No bottle detected (frame age {frame_age_s:.3f}s)")
+                last_X = last_Y = last_Z = None
 
             t_total = time.perf_counter() - t0
-            metrics.log(frame_age_s=frame_age_s, bottle_x=X, bottle_y=Y, bottle_z=Z, t_proc=t_total)
+            metrics.log(frame_age_s=frame_age_s, bottle_x=last_X, bottle_y=last_Y, bottle_z=last_Z, t_proc=t_total)
 
     finally:
         stereo.stop()
