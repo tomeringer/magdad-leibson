@@ -52,7 +52,6 @@ class YellowJacketEncoder:
     Encoder is on motor shaft (before gearbox)
     """
 
-    # Gray-code transition table
     _TRANS = {
         0b0001: +1, 0b0010: -1,
         0b0100: -1, 0b0111: +1,
@@ -67,7 +66,7 @@ class YellowJacketEncoder:
 
         # Yellow Jacket constants
         self.ppr_motor = 28
-        self.counts_per_rev_motor = self.ppr_motor * 4
+        self.counts_per_rev_motor = self.ppr_motor * 4  # 112 counts/rev (x4)
         self.gear_ratio = gear_ratio
         self.counts_per_rev_output = self.counts_per_rev_motor * gear_ratio
 
@@ -110,7 +109,6 @@ class YellowJacketEncoder:
         self._c_last = self.counts
 
     # ===== Public API =====
-
     def motor_rpm(self):
         return self._motor_rpm
 
@@ -122,6 +120,15 @@ class YellowJacketEncoder:
 
     def output_degrees(self):
         return self.output_revolutions() * 360.0
+
+    def zero(self):
+        """
+        Reset encoder count to zero and reset RPM window to avoid a spike.
+        """
+        self.counts = 0
+        self._c_last = 0
+        self._t_last = time.time()
+        self._motor_rpm = 0.0
 
     def stop(self):
         self._cba.cancel()
@@ -439,10 +446,13 @@ def detect_bottle_once():
     }
 
 def drive_distance(d_m):
+    enc.zero()
     enc.update()
     while enc.output_revolutions()*(2*math.pi*7.2) < d_m:
         drive_forward()
+        print("Distance traveled: " + str(enc.output_revolutions()*(2*math.pi*7.2)))
         time.sleep(0.05)
+        enc.update()
     stop_drive()
 
 
