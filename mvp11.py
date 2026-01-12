@@ -188,6 +188,7 @@ def servo_move_step(direction):
         print(">> Servo already OPEN - ignoring open command")
         return
 
+    new_val = current_pos
     # Apply one step
     if want_close:
         new_val = current_pos + MOVE_STEP
