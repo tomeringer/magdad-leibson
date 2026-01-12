@@ -449,7 +449,7 @@ def detect_bottle_once():
 def drive_distance(d_cm, forward: bool):
     enc.zero()
     enc.update()
-    d_cm = d_cm - 2
+    d_cm = d_cm - 1
     if forward:
         drive_forward()
     else:
