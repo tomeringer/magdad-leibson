@@ -206,6 +206,11 @@ if __name__ == '__main__':
 
             # --- YOLO (NO batching because NCNN backend can crash with list input) ---
             res_l = model.predict(frame_l_rect, conf=0.50, classes=[BOTTLE_CLASS_ID], verbose=False)[0]
+
+            box_l = pick_best_box(res_l)
+            if box_l is not None:
+                x_l = float(box_l.xywh[0][0].item())
+                y_l = float(box_l.xywh[0][1].item())
             # res_r = model.predict(frame_r_rect, conf=0.50, classes=[BOTTLE_CLASS_ID], verbose=False)[0]
             # --- find x_r by horizontal matching (epipolar line) ---
             y = int(round(y_l))
@@ -234,11 +239,6 @@ if __name__ == '__main__':
 
 
             X = Y = Z = None
-
-            box_l = pick_best_box(res_l)
-            if box_l is not None:
-                x_l = float(box_l.xywh[0][0].item())
-                y_l = float(box_l.xywh[0][1].item())
 
                 # Find a match in right frame with similar y (epipolar constraint after rectification)
                 best_r = None

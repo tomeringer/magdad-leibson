@@ -272,6 +272,19 @@ def init_vision():
     _vision_ready = True
     print("[VISION] Ready.", flush=True)
 
+def read_latest_stereo(cap_l, cap_r, flush_n=10):
+    """
+    Flush old frames from both cameras and return the latest pair.
+    """
+    for _ in range(flush_n):
+        cap_l.grab()
+        cap_r.grab()
+
+    ret_l, frame_l = cap_l.retrieve()
+    ret_r, frame_r = cap_r.retrieve()
+
+    return ret_l, frame_l, ret_r, frame_r
+
 
 def detect_bottle_once():
     """
@@ -282,8 +295,10 @@ def detect_bottle_once():
 
     t0 = time.perf_counter()
 
-    ret_l, frame_l_orig = _cap_l.read()
-    ret_r, frame_r_orig = _cap_r.read()
+    ret_l, frame_l_orig, ret_r, frame_r_orig = read_latest_stereo(
+        _cap_l, _cap_r, flush_n=5
+    )
+
     if not ret_l or not ret_r:
         return {"found": False, "err": "Failed to read frames", "t_proc": time.perf_counter() - t0}
 
