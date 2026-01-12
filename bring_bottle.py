@@ -46,6 +46,100 @@ YOLO_CONF = 0.50
 # Epipolar match tolerance in rectified images
 MATCH_Y_TOL = 10
 
+class YellowJacketEncoder:
+    """
+    Quadrature encoder reader for goBILDA Yellow Jacket motor
+    Encoder is on motor shaft (before gearbox)
+    """
+
+    _TRANS = {
+        0b0001: +1, 0b0010: -1,
+        0b0100: -1, 0b0111: +1,
+        0b1000: +1, 0b1011: -1,
+        0b1101: -1, 0b1110: +1,
+    }
+
+    def __init__(self, pi, gpio_a, gpio_b, gear_ratio=13.7):
+        self.pi = pi
+        self.gpio_a = gpio_a
+        self.gpio_b = gpio_b
+
+        # Yellow Jacket constants
+        self.ppr_motor = 28
+        self.counts_per_rev_motor = self.ppr_motor * 4  # 112 counts/rev (x4)
+        self.gear_ratio = gear_ratio
+        self.counts_per_rev_output = self.counts_per_rev_motor * gear_ratio
+
+        self.counts = 0
+        self._last_state = 0
+        self._t_last = time.time()
+        self._c_last = 0
+        self._motor_rpm = 0.0
+
+        for g in (gpio_a, gpio_b):
+            self.pi.set_mode(g, pigpio.INPUT)
+            self.pi.set_pull_up_down(g, pigpio.PUD_UP)
+
+        a = self.pi.read(gpio_a)
+        b = self.pi.read(gpio_b)
+        self._last_state = (a << 1) | b
+
+        self._cba = self.pi.callback(gpio_a, pigpio.EITHER_EDGE, self._cb)
+        self._cbb = self.pi.callback(gpio_b, pigpio.EITHER_EDGE, self._cb)
+
+    def _cb(self, gpio, level, tick):
+        a = self.pi.read(self.gpio_a)
+        b = self.pi.read(self.gpio_b)
+        new_state = (a << 1) | b
+        key = (self._last_state << 2) | new_state
+        self.counts += self._TRANS.get(key, 0)
+        self._last_state = new_state
+
+    def update(self, window_s=0.2):
+        t = time.time()
+        dt = t - self._t_last
+        if dt < window_s:
+            return
+
+        dc = self.counts - self._c_last
+        motor_rps = (dc / self.counts_per_rev_motor) / dt
+        self._motor_rpm = 60 * motor_rps
+
+        self._t_last = t
+        self._c_last = self.counts
+
+    # ===== Public API =====
+    def motor_rpm(self):
+        return self._motor_rpm
+
+    def output_rpm(self):
+        return self._motor_rpm / self.gear_ratio
+
+    def output_revolutions(self):
+        return self.counts / self.counts_per_rev_output
+
+    def output_degrees(self):
+        return self.output_revolutions() * 360.0
+
+    def zero(self):
+        """
+        Reset encoder count to zero and reset RPM window to avoid a spike.
+        """
+        self.counts = 0
+        self._c_last = 0
+        self._t_last = time.time()
+        self._motor_rpm = 0.0
+
+    def stop(self):
+        self._cba.cancel()
+        self._cbb.cancel()
+
+
+ENC_A = 24  # free
+ENC_B = 25  # free
+pi = pigpio.pi()
+enc = YellowJacketEncoder(pi, ENC_A, ENC_B, gear_ratio=13.7)
+
 # ============================================================
 # ULTRASONIC SENSOR
 # ============================================================
@@ -272,6 +366,19 @@ def init_vision():
     _vision_ready = True
     print("[VISION] Ready.", flush=True)
 
+def read_latest_stereo(cap_l, cap_r, flush_n=10):
+    """
+    Flush old frames from both cameras and return the latest pair.
+    """
+    for _ in range(flush_n):
+        cap_l.grab()
+        cap_r.grab()
+
+    ret_l, frame_l = cap_l.retrieve()
+    ret_r, frame_r = cap_r.retrieve()
+
+    return ret_l, frame_l, ret_r, frame_r
+
 
 def detect_bottle_once():
     """
@@ -282,8 +389,10 @@ def detect_bottle_once():
 
     t0 = time.perf_counter()
 
-    ret_l, frame_l_orig = _cap_l.read()
-    ret_r, frame_r_orig = _cap_r.read()
+    ret_l, frame_l_orig, ret_r, frame_r_orig = read_latest_stereo(
+        _cap_l, _cap_r, flush_n=5
+    )
+
     if not ret_l or not ret_r:
         return {"found": False, "err": "Failed to read frames", "t_proc": time.perf_counter() - t0}
 
@@ -336,6 +445,16 @@ def detect_bottle_once():
         "t_proc": t_proc
     }
 
+def drive_distance(d_m):
+    enc.zero()
+    enc.update()
+    drive_forward()
+    while enc.output_revolutions()*(2*math.pi*7.2) < d_m:
+        print("Distance traveled: " + str(enc.output_revolutions()*(2*math.pi*7.2)))
+        time.sleep(0.05)
+        enc.update()
+    stop_drive()
+
 
 def bring_bottle():
     V = 123  # Forward speed cm/s
@@ -355,7 +474,7 @@ def bring_bottle():
         stop_drive()
         print("Approached bottle.")
 
-        time.sleep()   
+        time.sleep(2)   
         while True:
             found_bottle = detect_bottle_once()
             if found_bottle["found"]:
@@ -428,7 +547,7 @@ def bring_bottle_yxz():
             break
         else:
             print("No bottle detected.")
-    StepperMotor.move(abs(Y_PARAM*found_bottle["Y"]), 1)  
+    StepperMotor.move(abs((Y_PARAM*found_bottle["Y"])//1), 1)  
     time.sleep(1)
     
 
@@ -579,6 +698,9 @@ def run_keyboard_loop():
                 print("[DRIVE] Driving forward 2 seconds.", flush=True)
                 drive_2_seconds_forward()
                 print("[DRIVE] Finished 2 seconds forward.", flush=True)
+
+            elif c == 'g':
+                drive_distance(0.5)
 
             else:
                 print("[INFO] Unknown command. Use w/s/a/d/x/i/k/u/j/c/q", flush=True)
