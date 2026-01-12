@@ -555,7 +555,7 @@ def drive_distance(d_cm, forward: bool):
 
 
 def turn_angle(theta_rad, left_turn: bool):
-    theta_rad = theta_rad - math.radians(7)
+    theta_rad = theta_rad - math.radians(5)
     print(theta_rad)
     enc.zero()
     enc.update()
