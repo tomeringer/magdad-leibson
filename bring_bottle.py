@@ -680,7 +680,7 @@ def run_keyboard_loop():
                 print("[DRIVE] Finished 2 seconds forward.", flush=True)
 
             elif c == 't':
-                turn_angle(np.pi / 2, True)
+                turn_angle(np.pi*4, True)
 
             else:
                 print("[INFO] Unknown command. Use w/s/a/d/x/i/k/u/j/c/q", flush=True)
