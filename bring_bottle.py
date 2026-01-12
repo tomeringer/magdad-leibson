@@ -428,7 +428,7 @@ def bring_bottle_yxz():
             break
         else:
             print("No bottle detected.")
-    StepperMotor.move(abs(Y_PARAM*found_bottle["Y"]), 1)  
+    StepperMotor.move(abs((Y_PARAM*found_bottle["Y"])//1), 1)  
     time.sleep(1)
     
 

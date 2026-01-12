@@ -206,7 +206,32 @@ if __name__ == '__main__':
 
             # --- YOLO (NO batching because NCNN backend can crash with list input) ---
             res_l = model.predict(frame_l_rect, conf=0.50, classes=[BOTTLE_CLASS_ID], verbose=False)[0]
-            res_r = model.predict(frame_r_rect, conf=0.50, classes=[BOTTLE_CLASS_ID], verbose=False)[0]
+            # res_r = model.predict(frame_r_rect, conf=0.50, classes=[BOTTLE_CLASS_ID], verbose=False)[0]
+            # --- find x_r by horizontal matching (epipolar line) ---
+            y = int(round(y_l))
+            band = 20  # pixels up/down
+            y0 = max(0, y - band)
+            y1 = min(H, y + band)
+
+            strip_l = frame_l_rect[y0:y1, :]
+            strip_r = frame_r_rect[y0:y1, :]
+
+            # Convert to grayscale
+            gL = cv2.cvtColor(strip_l, cv2.COLOR_BGR2GRAY)
+            gR = cv2.cvtColor(strip_r, cv2.COLOR_BGR2GRAY)
+
+            # Template around x_l in left image
+            tpl_w = 40
+            x0 = max(0, int(x_l - tpl_w // 2))
+            x1 = min(W, x0 + tpl_w)
+            template = gL[:, x0:x1]
+
+            # Match in right image
+            res = cv2.matchTemplate(gR, template, cv2.TM_SQDIFF)
+            _, _, min_loc, _ = cv2.minMaxLoc(res)
+
+            x_r = float(min_loc[0] + template.shape[1] / 2)
+
 
             X = Y = Z = None
 
