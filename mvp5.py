@@ -73,6 +73,18 @@ last_rx = 0.0
 # GLOBAL STATE (edge-detected)
 # ============================================================
 prev_f0 = prev_f1 = prev_f2 = prev_f3 = 0
+# ============================================================
+# DRIVE HISTORY (for ultrasonic override pattern)
+#   Pattern to override ultrasonic "too close":
+#     <DIR>, STOP, <DIR>   where DIR in {FWD, LEFT, RIGHT}
+#   Once triggered, override stays active while holding the same DIR,
+#   and turns off when you STOP, REVERSE, or change direction.
+# ============================================================
+_prev_drive_req = "STOP"
+_prev_prev_drive_req = "STOP"
+_ultra_override_active = False
+_ultra_override_cmd = None
+
 
 # ============================================================
 # ULTRASONIC SENSORS (ASYNC)
@@ -619,7 +631,7 @@ def bring_bottle():
 
 
 def bring_bottle_xz():
-    time.sleep(3)
+    time.sleep(2)
     z0 = 22
     t0 = time.perf_counter()
     while True:
@@ -669,7 +681,9 @@ def shutdown_vision():
 #     f3 -> bit3 -> A3
 # ============================================================
 def handle_payload(payload: int):
-    global prev_f0, prev_f1, prev_f2, prev_f3, _stepper_dir, _last_pkt_t
+    global prev_f0, prev_f1, prev_f2, prev_f3
+    global _stepper_dir, _last_pkt_t
+    global _prev_drive_req, _prev_prev_drive_req, _ultra_override_active, _ultra_override_cmd
 
     _last_pkt_t = time.time()  # refresh stepper-command validity on every valid packet
 
@@ -681,7 +695,7 @@ def handle_payload(payload: int):
     f1 = (flex >> 1) & 1
     f2 = (flex >> 2) & 1
     f3 = (flex >> 3) & 1
-    
+
     # ------------------------------------------------------------
     # Special combo: all fingers pressed -> bring bottle
     # ------------------------------------------------------------
@@ -689,7 +703,7 @@ def handle_payload(payload: int):
         bring_bottle_xz()
         prev_f0, prev_f1, prev_f2, prev_f3 = f0, f1, f2, f3
         return
-    
+
     # ------------------------------------------------------------
     # Servo edge detection (now: f3=close, f2=open)
     # ------------------------------------------------------------
@@ -715,39 +729,81 @@ def handle_payload(payload: int):
     # update previous states for edge detection
     prev_f0, prev_f1, prev_f2, prev_f3 = f0, f1, f2, f3
 
+    # ------------------------------------------------------------
+    # Decide requested DRIVE command from roll/pitch
+    #   (independent of ultrasonic gating)
+    # ------------------------------------------------------------
+    if pitch_code == 0b01:
+        drive_req = "REV"
+    elif pitch_code == 0b10:
+        drive_req = "FWD"
+    elif roll_code == 0b01:
+        drive_req = "LEFT"
+    elif roll_code == 0b10:
+        drive_req = "RIGHT"
+    else:
+        drive_req = "STOP"
 
-    # DC motors (unchanged logic)
     too_close = obstacle_too_close()
 
-    if pitch_code == 0b01:
-        # Move backward (both DC motors backward). Slight bias (0.51 vs 0.50) to help correct drift.
-        # RIGHT_RPWM.value, LEFT_RPWM.value = 0.51, 0.50
-        # RIGHT_LPWM.value = LEFT_LPWM.value = 0.0
+    # ------------------------------------------------------------
+    # Ultrasonic override logic:
+    # Trigger only if too close AND we see: DIR, STOP, DIR
+    # where DIR is FWD/LEFT/RIGHT (NOT reverse).
+    # Then keep override active while holding same DIR.
+    # Turn off override on STOP / REV / direction change.
+    # ------------------------------------------------------------
+    allowed_dir = {"FWD", "LEFT", "RIGHT"}
+
+    # Deactivate override if user stops, reverses, or changes direction
+    if _ultra_override_active:
+        if drive_req in ("STOP", "REV") or drive_req != _ultra_override_cmd:
+            _ultra_override_active = False
+            _ultra_override_cmd = None
+
+    # Check trigger pattern: (two steps ago == current) and (previous == STOP)
+    if (not _ultra_override_active) and too_close and (drive_req in allowed_dir):
+        if _prev_drive_req == "STOP" and _prev_prev_drive_req == drive_req:
+            _ultra_override_active = True
+            _ultra_override_cmd = drive_req
+            print(f"[OVERRIDE] Ultrasonic override armed for {drive_req}")
+
+    # Can we move despite obstacle?
+    allow_despite_ultra = (_ultra_override_active and (drive_req == _ultra_override_cmd))
+
+    # ------------------------------------------------------------
+    # Apply DC motors (reverse always allowed)
+    # ------------------------------------------------------------
+    if drive_req == "REV":
         drive_reverse()
 
+    elif drive_req == "FWD":
+        if (not too_close) or allow_despite_ultra:
+            drive_forward()
+        else:
+            stop_drive()
 
+    elif drive_req == "LEFT":
+        if (not too_close) or allow_despite_ultra:
+            turn_left()
+        else:
+            stop_drive()
 
-    elif pitch_code == 0b10 and not too_close:
-        # Move forward (both DC motors forward). Slight bias (0.51 vs 0.50) to help correct drift.
-        # RIGHT_LPWM.value, LEFT_LPWM.value = 0.51, 0.50
-        # RIGHT_RPWM.value = LEFT_RPWM.value = 0.0
-        drive_forward()
-
-    elif roll_code == 0b01 and not too_close:
-        # Turn left in place (right motor backward, left motor forward) -> rotates counter-clockwise.
-        # RIGHT_RPWM.value, LEFT_LPWM.value = 0.51, 0.50
-        # RIGHT_LPWM.value = LEFT_RPWM.value = 0.0
-        turn_left()
-
-    elif roll_code == 0b10 and not too_close:
-        # Turn right in place (right motor forward, left motor backward) -> rotates clockwise.
-        # RIGHT_LPWM.value, LEFT_RPWM.value = 0.51, 0.50
-        # RIGHT_RPWM.value = LEFT_LPWM.value = 0.0
-        turn_right()
+    elif drive_req == "RIGHT":
+        if (not too_close) or allow_despite_ultra:
+            turn_right()
+        else:
+            stop_drive()
 
     else:
-    # Stop both DC motors.
         stop_drive()
+
+    # ------------------------------------------------------------
+    # Update history of REQUESTED drive commands (not what actually happened)
+    # ------------------------------------------------------------
+    _prev_prev_drive_req = _prev_drive_req
+    _prev_drive_req = drive_req
+
 
 # ============================================================
 # MAIN LOOP
