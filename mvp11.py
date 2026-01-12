@@ -170,24 +170,42 @@ MOVE_STEP = 0.39  # 70 מעלות עבור מנוע 360
 
 # אנחנו מתחילים ב-0, אבל המנוע לא ידע מזה עד הלחיצה הראשונה
 current_pos = 0.0
+# Servo logical state (start OPEN)
+servo_is_open = True
 
 
 def servo_move_step(direction):
-    global current_pos
+    global current_pos, servo_is_open
 
-    # במידה וזו הפעם הראשונה, המנוע יתחיל מהאמצע (0) או מכל ערך שתבחר כאן
-    if direction == 1:
+    # direction: 1 = close, 0 = open
+    want_close = (direction == 1)
+
+    # Ignore redundant commands
+    if want_close and (not servo_is_open):
+        print(">> Servo already CLOSED - ignoring close command")
+        return
+    if (not want_close) and servo_is_open:
+        print(">> Servo already OPEN - ignoring open command")
+        return
+
+    # Apply one step
+    if want_close:
         new_val = current_pos - MOVE_STEP
     else:
         new_val = current_pos + MOVE_STEP
 
-    # הגנה על גבולות
+    # Clamp
     if new_val > 1.0: new_val = 1.0
     if new_val < -1.0: new_val = -1.0
 
     current_pos = new_val
     servo.value = current_pos
-    print(f">> בתנועה לערך: {current_pos:.2f}")
+
+    # Update logical state only if we actually moved
+    servo_is_open = (not want_close)
+
+    state_str = "OPEN" if servo_is_open else "CLOSED"
+    print(f">> Servo moved to {current_pos:.2f} | state={state_str}")
 
 
 # ============================================================
