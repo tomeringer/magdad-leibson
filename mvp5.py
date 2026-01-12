@@ -713,7 +713,7 @@ def handle_payload(payload: int):
     # DC motors (unchanged logic)
     too_close = obstacle_too_close()
 
-    if pitch_code == 0b01 and not too_close:
+    if pitch_code == 0b01:
         # Move backward (both DC motors backward). Slight bias (0.51 vs 0.50) to help correct drift.
         # RIGHT_RPWM.value, LEFT_RPWM.value = 0.51, 0.50
         # RIGHT_LPWM.value = LEFT_LPWM.value = 0.0
@@ -721,7 +721,7 @@ def handle_payload(payload: int):
 
 
 
-    elif pitch_code == 0b10:
+    elif pitch_code == 0b10 and not too_close:
         # Move forward (both DC motors forward). Slight bias (0.51 vs 0.50) to help correct drift.
         # RIGHT_LPWM.value, LEFT_LPWM.value = 0.51, 0.50
         # RIGHT_RPWM.value = LEFT_RPWM.value = 0.0
