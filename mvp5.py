@@ -137,36 +137,42 @@ def obstacle_too_close() -> bool:
 
 
 
-# ============================================================
-# SERVO
-# ============================================================
+# --- הגדרות חומרה ---
 SERVO_PIN = 12
-MOVE_STEP = 0.39
+factory = PiGPIOFactory()
+
+# הפתרון כאן: initial_value=None גורם למנוע לא לזוז בכלל כשהקוד עולה
+servo = Servo(
+    SERVO_PIN,
+    initial_value=None,
+    min_pulse_width=0.5 / 1000,
+    max_pulse_width=2.5 / 1000,
+    pin_factory=factory
+)
+
+# --- הגדרות תנועה ---
+MOVE_STEP = 0.39  # 70 מעלות עבור מנוע 360
+
+# אנחנו מתחילים ב-0, אבל המנוע לא ידע מזה עד הלחיצה הראשונה
 current_pos = 0.0
-_servo = None
 
 
-def servo_init():
-    global _servo
-    _servo = Servo(
-        SERVO_PIN,
-        initial_value=None,
-        pin_factory=factory,
-        min_pulse_width=0.5 / 1000,
-        max_pulse_width=2.5 / 1000,
-    )
-    print(f"[SERVO] Ready on GPIO {SERVO_PIN}")
-
-
-def servo_move_step(direction: int):
+def servo_move_step(direction):
     global current_pos
-    if _servo is None:
-        return
 
-    new_val = current_pos - MOVE_STEP if direction == 1 else current_pos + MOVE_STEP
-    current_pos = max(-1.0, min(1.0, new_val))
-    _servo.value = current_pos
-    print(f"[SERVO] Edge Detected! Moved to {current_pos:.2f}")
+    # במידה וזו הפעם הראשונה, המנוע יתחיל מהאמצע (0) או מכל ערך שתבחר כאן
+    if direction == "open":
+        new_val = current_pos - MOVE_STEP
+    else:
+        new_val = current_pos + MOVE_STEP
+
+    # הגנה על גבולות
+    if new_val > 1.0: new_val = 1.0
+    if new_val < -1.0: new_val = -1.0
+
+    current_pos = new_val
+    servo.value = current_pos
+    print(f">> בתנועה לערך: {current_pos:.2f}")
 
 
 # ============================================================
@@ -814,7 +820,6 @@ def run_glove_loop():
 # ENTRY
 # ============================================================
 if __name__ == "__main__":
-    servo_init()
     try:
         init_vision()
         run_glove_loop()
