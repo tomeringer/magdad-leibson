@@ -577,6 +577,8 @@ def drive_2_seconds_forward():
     time.sleep(2)
     stop_drive()
 
+
+
 # ============================================================
 # KEYBOARD LOOP
 # ============================================================
@@ -677,8 +679,8 @@ def run_keyboard_loop():
                 drive_2_seconds_forward()
                 print("[DRIVE] Finished 2 seconds forward.", flush=True)
 
-            elif c == 'g':
-                drive_distance(d_cm=50)
+            elif c == 't':
+                turn_right(np.pi / 2, True)
 
             else:
                 print("[INFO] Unknown command. Use w/s/a/d/x/i/k/u/j/c/q", flush=True)
