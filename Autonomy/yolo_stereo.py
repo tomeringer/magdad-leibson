@@ -240,25 +240,25 @@ if __name__ == '__main__':
 
             X = Y = Z = None
 
-                # Find a match in right frame with similar y (epipolar constraint after rectification)
-                best_r = None
-                if res_r.boxes is not None and len(res_r.boxes) > 0:
-                    for box_r in res_r.boxes:
-                        x_r = float(box_r.xywh[0][0].item())
-                        y_r = float(box_r.xywh[0][1].item())
-                        if abs(y_l - y_r) < 10:
-                            best_r = (x_r, y_r)
-                            break
+            # Find a match in right frame with similar y (epipolar constraint after rectification)
+            best_r = None
+            if res_r.boxes is not None and len(res_r.boxes) > 0:
+                for box_r in res_r.boxes:
+                    x_r = float(box_r.xywh[0][0].item())
+                    y_r = float(box_r.xywh[0][1].item())
+                    if abs(y_l - y_r) < 10:
+                        best_r = (x_r, y_r)
+                        break
 
-                if best_r is not None:
-                    x_r, _ = best_r
+            if best_r is not None:
+                x_r, _ = best_r
 
-                    # Signed disparity is important for Q reprojection
-                    disparity = float(x_l - x_r)
+                # Signed disparity is important for Q reprojection
+                disparity = float(x_l - x_r)
 
-                    if abs(disparity) > 0.5:
-                        X, Y, Z = calculate_3d_coords(disparity, x_l, y_l, Q_matrix)
-                        print(f"X:{X:.1f}  Y:{Y:.1f}  Z:{Z:.1f}   (age {frame_age_s:.3f}s)")
+                if abs(disparity) > 0.5:
+                    X, Y, Z = calculate_3d_coords(disparity, x_l, y_l, Q_matrix)
+                    print(f"X:{X:.1f}  Y:{Y:.1f}  Z:{Z:.1f}   (age {frame_age_s:.3f}s)")
 
             t_total = time.perf_counter() - t0
             metrics.log(frame_age_s=frame_age_s, bottle_x=X, bottle_y=Y, bottle_z=Z, t_proc=t_total)
