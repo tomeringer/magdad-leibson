@@ -16,7 +16,6 @@ from gpiozero.pins.pigpio import PiGPIOFactory
 
 import math
 import pickle
-from typing import Optional
 
 import cv2
 import numpy as np
@@ -68,6 +67,7 @@ STEP_CMD_STALE_SEC = 0.12         # if no valid packets for this long -> stop st
 _stepper_dir = 0                  # -1, 0, +1 (desired direction while held)
 _last_pkt_t = 0.0                 # last time we received a valid framed packet
 sock = None
+last_rx = 0.0
 
 # ============================================================
 # GLOBAL STATE (edge-detected)
@@ -768,7 +768,7 @@ def handle_payload_xz(payload: int):
 # MAIN LOOP
 # ============================================================
 def run_glove_loop():
-    global _stepper_dir, _last_pkt_t, sock
+    global _stepper_dir, _last_pkt_t, sock, last_rx
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind((UDP_LISTEN_IP, UDP_PORT))
