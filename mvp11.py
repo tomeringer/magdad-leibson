@@ -191,8 +191,8 @@ def servo_move_step(direction):
     # Apply one step
     if want_close:
         new_val = current_pos + MOVE_STEP
-    else:
-        new_val = current_pos - MOVE_STEP
+    # else:
+    #     new_val = current_pos - MOVE_STEP
 
     # Clamp
     if new_val > 1.0: new_val = 1.0
