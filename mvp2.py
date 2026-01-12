@@ -215,7 +215,7 @@ def stepper_tick(direction: int):
 #     f3 -> bit3 -> A3
 # ============================================================
 def handle_payload(payload: int):
-    global prev_f0, prev_f1, _stepper_dir, _last_pkt_t
+    global prev_f0, prev_f1, prev_f2, prev_f3, _stepper_dir, _last_pkt_t
 
     _last_pkt_t = time.time()  # refresh stepper-command validity on every valid packet
 
@@ -228,45 +228,57 @@ def handle_payload(payload: int):
     f2 = (flex >> 2) & 1
     f3 = (flex >> 3) & 1
 
-    # Servo edge detection
-    if f0 == 1 and prev_f0 == 0:
-        print("[EVENT] Finger 0 (A0) pressed -> Closing Servo")
+    # ------------------------------------------------------------
+    # Servo edge detection (now: f3=close, f2=open)
+    # ------------------------------------------------------------
+    if f3 == 1 and prev_f3 == 0:
+        print("[EVENT] Finger 3 (A3) pressed -> Closing Servo")
         servo_move_step(1)
 
-    if f1 == 1 and prev_f1 == 0:
-        print("[EVENT] Finger 1 (A2) pressed -> Opening Servo")
+    if f2 == 1 and prev_f2 == 0:
+        print("[EVENT] Finger 2 (A1) pressed -> Opening Servo")
         servo_move_step(0)
 
-    prev_f0, prev_f1 = f0, f1
-
-    # Stepper "held" command: only set desired direction (movement happens in main loop)
-    if f2 == 1 and f3 == 0:
-        _stepper_dir = +1
-    elif f3 == 1 and f2 == 0:
-        _stepper_dir = -1
+    # ------------------------------------------------------------
+    # Stepper "held" command (now: f0=down, f1=up)
+    #   Movement happens in main loop based on _stepper_dir
+    # ------------------------------------------------------------
+    if f0 == 1 and f1 == 0:
+        _stepper_dir = -1   # down
+    elif f1 == 1 and f0 == 0:
+        _stepper_dir = +1   # up
     else:
         _stepper_dir = 0
+
+    # update previous states for edge detection
+    prev_f0, prev_f1, prev_f2, prev_f3 = f0, f1, f2, f3
+
 
     # DC motors (unchanged logic)
     too_close = obstacle_too_close()
 
     if pitch_code == 0b01 and not too_close:
+        # Move backward (both DC motors backward). Slight bias (0.51 vs 0.50) to help correct drift.
         RIGHT_RPWM.value, LEFT_RPWM.value = 0.51, 0.50
         RIGHT_LPWM.value = LEFT_LPWM.value = 0.0
 
     elif pitch_code == 0b10:
+        # Move forward (both DC motors forward). Slight bias (0.51 vs 0.50) to help correct drift.
         RIGHT_LPWM.value, LEFT_LPWM.value = 0.51, 0.50
         RIGHT_RPWM.value = LEFT_RPWM.value = 0.0
 
     elif roll_code == 0b01 and not too_close:
+        # Turn left in place (right motor backward, left motor forward) -> rotates counter-clockwise.
         RIGHT_RPWM.value, LEFT_LPWM.value = 0.51, 0.50
         RIGHT_LPWM.value = LEFT_RPWM.value = 0.0
 
     elif roll_code == 0b10 and not too_close:
+        # Turn right in place (right motor forward, left motor backward) -> rotates clockwise.
         RIGHT_LPWM.value, LEFT_RPWM.value = 0.51, 0.50
         RIGHT_RPWM.value = LEFT_LPWM.value = 0.0
 
     else:
+        # Stop both DC motors.
         stop_dc()
 
 
