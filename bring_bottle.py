@@ -456,7 +456,7 @@ def drive_distance(d_cm, forward: bool):
 def turn_angle(theta_rad, left_turn: bool):
     print(theta_rad)
     if not left_turn:
-        theta_rad = theta_rad - math.radians(5)
+        theta_rad = theta_rad - math.radians(4)
     enc.zero()
     enc.update()
     radius = 39.0/2.0
