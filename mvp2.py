@@ -28,7 +28,7 @@ factory = PiGPIOFactory()
 
 # ---- Stepper "continuous feel" ----
 STEPPER_CHUNK = 4                 # keep small so stop feels immediate
-STEPPER_STEP_DELAY_SEC = 0.0015
+STEPPER_STEP_DELAY_SEC = 0.0005   # was 0.0015
 STEPPER_TICK_SEC = 0.05           # glove sends every 50ms -> match it
 _last_stepper_cmd_t = 0.0
 
@@ -261,7 +261,7 @@ def handle_payload(payload: int):
     elif roll_code == 0b01 and not too_close:
         RIGHT_RPWM.value, LEFT_LPWM.value = 0.51, 0.50
         RIGHT_LPWM.value = LEFT_RPWM.value = 0.0
-        
+
     elif roll_code == 0b10 and not too_close:
         RIGHT_LPWM.value, LEFT_RPWM.value = 0.51, 0.50
         RIGHT_RPWM.value = LEFT_LPWM.value = 0.0
