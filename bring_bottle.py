@@ -463,6 +463,7 @@ def turn_angle(theta_rad, left_turn: bool):
         turn_left(0.4)
     else:
         turn_right(0.4)
+        theta_rad = theta_rad - math.radians(5)
     while abs(enc.output_revolutions())*(math.pi*7.2) < segment:
         print("Distance traveled: " + str(enc.output_revolutions()*(math.pi*7.2)))
         time.sleep(0.01)
