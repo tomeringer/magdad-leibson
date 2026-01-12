@@ -162,21 +162,23 @@ if __name__ == '__main__':
     try:
         while True:
             t0 = time.perf_counter()
+            print("debug1")
             pack = stereo.read_latest()
             if pack is None:
                 continue
+            print("debug2")
 
             tcap, frame_l_orig, frame_r_orig = pack
             frame_age_s = time.perf_counter() - tcap
-
+            print("debug3")
             # Rectify
             frame_l_rect = cv2.remap(frame_l_orig, maps_l[0], maps_l[1], cv2.INTER_LINEAR)
             frame_r_rect = cv2.remap(frame_r_orig, maps_r[0], maps_r[1], cv2.INTER_LINEAR)
-
+            print("debug4")
             # YOLO left image
             res_l = model.predict(frame_l_rect, conf=0.50, classes=[BOTTLE_CLASS_ID], verbose=False)[0]
             box_l = pick_best_box(res_l)
-
+            print("debug5")
             if box_l is not None:
                 print(f"Bottle detected with confidence {box_l.conf.item():.3f}")
                 x_l = float(box_l.xywh[0][0].item())
