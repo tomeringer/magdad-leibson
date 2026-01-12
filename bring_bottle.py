@@ -445,11 +445,11 @@ def detect_bottle_once():
         "t_proc": t_proc
     }
 
-def drive_distance(d_m):
+def drive_distance(d_cm):
     enc.zero()
     enc.update()
     drive_forward()
-    while enc.output_revolutions()*(math.pi*7.2) < d_m:
+    while enc.output_revolutions()*(math.pi*7.2) < d_cm:
         print("Distance traveled: " + str(enc.output_revolutions()*(math.pi*7.2)))
         time.sleep(0.05)
         enc.update()
@@ -700,7 +700,7 @@ def run_keyboard_loop():
                 print("[DRIVE] Finished 2 seconds forward.", flush=True)
 
             elif c == 'g':
-                drive_distance(0.5)
+                drive_distance(d_cm=50)
 
             else:
                 print("[INFO] Unknown command. Use w/s/a/d/x/i/k/u/j/c/q", flush=True)
