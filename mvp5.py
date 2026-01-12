@@ -547,7 +547,7 @@ def drive_distance(d_cm, forward: bool):
         drive_forward()
     else:
         drive_reverse()
-    while abs(enc.output_revolutions()) * (math.pi * 7.2) < d_cm and read_udp_xz():
+    while abs(enc.output_revolutions()) * (math.pi * 7.2) < d_cm:
         print("Distance traveled: " + str(enc.output_revolutions() * (math.pi * 7.2)))
         time.sleep(0.01)
         enc.update()
@@ -565,7 +565,7 @@ def turn_angle(theta_rad, left_turn: bool):
         turn_left(0.4)
     else:
         turn_right(0.4)
-    while abs(enc.output_revolutions()) * (math.pi * 7.2) < segment and read_udp_xz():
+    while abs(enc.output_revolutions()) * (math.pi * 7.2) < segment:
         print("Distance traveled: " + str(enc.output_revolutions() * (math.pi * 7.2)))
         time.sleep(0.01)
         enc.update()
@@ -742,19 +742,6 @@ def handle_payload(payload: int):
     else:
     # Stop both DC motors.
         stop_drive()
-
-def read_udp_xz():
-    try:
-        data, _ = sock.recvfrom(1024)
-        if len(data) >= 3 and data[0] == FRAME_START and data[2] == FRAME_END:
-            last_rx = time.time()
-            return handle_payload_xz(data[1])
-        return False
-    except socket.timeout:
-        # Stop DC motors on long silence
-        if time.time() - last_rx > SILENCE_STOP_SEC:
-            stop_drive()
-
 
 # ============================================================
 # MAIN LOOP
