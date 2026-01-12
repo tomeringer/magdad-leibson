@@ -458,7 +458,7 @@ def turn_angle(theta_rad, left_turn: bool):
     enc.zero()
     enc.update()
     radius = 42.0/2.0
-    segment = radius * theta_rad
+    segment = radius * abs(theta_rad)
     if left_turn:
         turn_left(0.4)
     else:
