@@ -442,6 +442,7 @@ def drive_distance(d_m):
     enc.update()
     while enc.output_revolutions()*(2*math.pi*7.2) < d_m:
         drive_forward()
+        time.sleep(0.05)
     stop_drive()
 
 
