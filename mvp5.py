@@ -161,7 +161,7 @@ def servo_move_step(direction):
     global current_pos
 
     # במידה וזו הפעם הראשונה, המנוע יתחיל מהאמצע (0) או מכל ערך שתבחר כאן
-    if direction == "open":
+    if direction == 1:
         new_val = current_pos - MOVE_STEP
     else:
         new_val = current_pos + MOVE_STEP
