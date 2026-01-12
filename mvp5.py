@@ -756,15 +756,6 @@ def read_udp_xz():
             stop_drive()
 
 
-def handle_payload_xz(payload: int):
-    pitch_code = payload & 0x03
-    if pitch_code == 0b10:
-        return False
-    return True
-    
-
-    
-
 # ============================================================
 # MAIN LOOP
 # ============================================================
