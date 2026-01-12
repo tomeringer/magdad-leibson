@@ -68,7 +68,7 @@ class YellowJacketEncoder:
         self.gpio_b = gpio_b
 
         # ===== SITE SPEC (USED DIRECTLY) =====
-        self.ppr_output = 384.5
+        self.ppr_output = 384.5 * (100 / 106)
         self.counts_per_rev_output = self.ppr_output  # 1538 counts/rev
 
         self.counts = 0
