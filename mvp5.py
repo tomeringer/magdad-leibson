@@ -12,8 +12,6 @@ from typing import Optional
 from gpiozero import PWMOutputDevice, Servo
 from gpiozero.pins.pigpio import PiGPIOFactory
 
-
-
 import math
 import pickle
 
@@ -35,12 +33,54 @@ SILENCE_STOP_SEC = 0.7
 
 factory = PiGPIOFactory()
 
-# ---- Stereo / YOLO config ----
+# ============================================================
+# SERVO (GPIOZERO + PIGPIO)  |  servo_move_step(0=close, 1=open)
+# ============================================================
+SERVO_PIN = 12
 
+# initial_value=None -> servo will NOT move on startup
+_servo = Servo(
+    SERVO_PIN,
+    initial_value=None,
+    min_pulse_width=0.5 / 1000,
+    max_pulse_width=2.5 / 1000,
+    pin_factory=factory
+)
+
+SERVO_MOVE_STEP = 0.39  # your step value
+_servo_pos = 0.0        # internal state (servo won't "know" until first move)
+
+
+def servo_move_step(action: int):
+    """
+    Step the servo in small increments.
+
+    action:
+      0 -> close
+      1 -> open
+    """
+    global _servo_pos
+
+    if action == 1:  # open
+        new_val = _servo_pos - SERVO_MOVE_STEP
+    else:            # close
+        new_val = _servo_pos + SERVO_MOVE_STEP
+
+    # clamp
+    if new_val > 1.0:
+        new_val = 1.0
+    if new_val < -1.0:
+        new_val = -1.0
+
+    _servo_pos = new_val
+    _servo.value = _servo_pos
+    print(f"[SERVO] Move to value: {_servo_pos:.2f}", flush=True)
+
+
+# ---- Stereo / YOLO config ----
 CALIBRATION_FILE_PATH = r"Autonomy/stereo_calibration.pkl"
 
 LEFT_CAM = "/dev/v4l/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.4:1.0-video-index0"
-
 RIGHT_CAM = "/dev/v4l/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0"
 
 W = 640
@@ -53,7 +93,6 @@ BOTTLE_CLASS_ID = 39
 YOLO_CONF = 0.50
 
 # Epipolar match tolerance in rectified images
-
 MATCH_Y_TOL = 10
 
 # ---- Stepper "continuous feel" ----
@@ -73,18 +112,14 @@ last_rx = 0.0
 # GLOBAL STATE (edge-detected)
 # ============================================================
 prev_f0 = prev_f1 = prev_f2 = prev_f3 = 0
+
 # ============================================================
 # DRIVE HISTORY (for ultrasonic override pattern)
-#   Pattern to override ultrasonic "too close":
-#     <DIR>, STOP, <DIR>   where DIR in {FWD, LEFT, RIGHT}
-#   Once triggered, override stays active while holding the same DIR,
-#   and turns off when you STOP, REVERSE, or change direction.
 # ============================================================
 _prev_drive_req = "STOP"
 _prev_prev_drive_req = "STOP"
 _ultra_override_active = False
 _ultra_override_cmd = None
-
 
 # ============================================================
 # ULTRASONIC SENSORS (ASYNC)
@@ -148,45 +183,6 @@ def obstacle_too_close() -> bool:
     return False
 
 
-
-# --- הגדרות חומרה ---
-SERVO_PIN = 12
-factory = PiGPIOFactory()
-
-# הפתרון כאן: initial_value=None גורם למנוע לא לזוז בכלל כשהקוד עולה
-servo = Servo(
-    SERVO_PIN,
-    initial_value=None,
-    min_pulse_width=0.5 / 1000,
-    max_pulse_width=2.5 / 1000,
-    pin_factory=factory
-)
-
-# --- הגדרות תנועה ---
-MOVE_STEP = 0.39  # 70 מעלות עבור מנוע 360
-
-# אנחנו מתחילים ב-0, אבל המנוע לא ידע מזה עד הלחיצה הראשונה
-current_pos = 0.0
-
-
-def servo_move_step(direction):
-    global current_pos
-
-    # במידה וזו הפעם הראשונה, המנוע יתחיל מהאמצע (0) או מכל ערך שתבחר כאן
-    if direction == 1:
-        new_val = current_pos - MOVE_STEP
-    else:
-        new_val = current_pos + MOVE_STEP
-
-    # הגנה על גבולות
-    if new_val > 1.0: new_val = 1.0
-    if new_val < -1.0: new_val = -1.0
-
-    current_pos = new_val
-    servo.value = current_pos
-    print(f">> בתנועה לערך: {current_pos:.2f}")
-
-
 # ============================================================
 # DC MOTORS
 # ============================================================
@@ -216,8 +212,9 @@ def turn_right(speed: float = 0.5):
 
 
 def turn_left(speed: float = 0.5):
-    RIGHT_RPWM.value, LEFT_LPWM.value = speed + 0.01, speed
+    RIGHT_RPWM.value, LEFT_RPWM.value = speed + 0.01, speed
     RIGHT_LPWM.value, LEFT_RPWM.value = 0.0, 0.0
+
 
 # ============================================================
 # ENCODER
@@ -230,7 +227,6 @@ class YellowJacketEncoder:
         Quadrature decoding -> x4
     """
 
-    # Quadrature transition table
     _TRANS = {
         0b0001: +1, 0b0010: -1,
         0b0100: -1, 0b0111: +1,
@@ -243,9 +239,8 @@ class YellowJacketEncoder:
         self.gpio_a = gpio_a
         self.gpio_b = gpio_b
 
-        # ===== SITE SPEC (USED DIRECTLY) =====
         self.ppr_output = 384.5 * (100 / 106)
-        self.counts_per_rev_output = self.ppr_output  # 1538 counts/rev
+        self.counts_per_rev_output = self.ppr_output
 
         self.counts = 0
         self._last_state = 0
@@ -285,7 +280,6 @@ class YellowJacketEncoder:
         self._t_last = t
         self._c_last = self.counts
 
-    # ===== Public API =====
     def output_revolutions(self):
         return self.counts / self.counts_per_rev_output
 
@@ -306,11 +300,10 @@ class YellowJacketEncoder:
         self._cbb.cancel()
 
 
-ENC_A = 24  # free
-ENC_B = 25  # free
+ENC_A = 24
+ENC_B = 25
 pi = pigpio.pi()
 enc = YellowJacketEncoder(pi, ENC_A, ENC_B)
-
 
 
 # ============================================================
@@ -341,7 +334,6 @@ class StepperMotor:
                     self.pi.write(p, self.seq[idx][i])
                 time.sleep(delay_sec)
 
-        # de-energize between chunks
         self.deenergize()
 
     def deenergize(self):
@@ -367,11 +359,9 @@ def stepper_tick(direction: int):
         _stepper.step_chunk(STEPPER_CHUNK, direction=direction, delay_sec=STEPPER_STEP_DELAY_SEC)
 
 
-
 # ============================================================
 # VISION (Stereo + YOLO) as functions
 # ============================================================
-# Global cached vision state so pressing 'c' is fast
 _vision_ready = False
 _model = None
 _cap_l = None
@@ -393,7 +383,6 @@ def open_cam(path: str, name: str):
     cap.set(cv2.CAP_PROP_FPS, CAM_FPS)
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 2)
 
-    # Warm up
     for _ in range(10):
         cap.read()
 
@@ -445,18 +434,11 @@ def calculate_3d_coords(disparity, x, y, Q_matrix):
 
 
 def init_vision():
-    """
-    Call once at startup (or lazy-init on first 'c').
-    """
     global _vision_ready, _model, _cap_l, _cap_r, _maps_l, _maps_r, _Q
-
     if _vision_ready:
         return
 
     print("[VISION] Initializing YOLO + stereo...", flush=True)
-
-    # Load YOLO (adjust to your actual model path)
-    # _model = YOLO('yolov8n.pt')
     _model = YOLO('Autonomy/yolov8n_ncnn_model', task='detect')
 
     _cap_l = open_cam(LEFT_CAM, "LEFT")
@@ -465,47 +447,33 @@ def init_vision():
         raise RuntimeError("One or both cameras failed to open.")
 
     _maps_l, _maps_r, _Q = (*load_and_prepare_calibration(CALIBRATION_FILE_PATH),)
-    # load_and_prepare_calibration returns (maps_l, maps_r, Q)
-    # The line above packs it into _maps_l, _maps_r, _Q
 
     _vision_ready = True
     print("[VISION] Ready.", flush=True)
 
+
 def read_latest_stereo(cap_l, cap_r, flush_n=10):
-    """
-    Flush old frames from both cameras and return the latest pair.
-    """
     for _ in range(flush_n):
         cap_l.grab()
         cap_r.grab()
 
     ret_l, frame_l = cap_l.retrieve()
     ret_r, frame_r = cap_r.retrieve()
-
     return ret_l, frame_l, ret_r, frame_r
 
 
 def detect_bottle_once():
-    """
-    Grabs one stereo pair and tries to compute bottle (X,Y,Z) and pixel center.
-    Returns dict with keys: found, X,Y,Z,cx,cy,disparity,conf,t_proc
-    """
     global _model, _cap_l, _cap_r, _maps_l, _maps_r, _Q
 
     t0 = time.perf_counter()
 
-    ret_l, frame_l_orig, ret_r, frame_r_orig = read_latest_stereo(
-        _cap_l, _cap_r, flush_n=5
-    )
-
+    ret_l, frame_l_orig, ret_r, frame_r_orig = read_latest_stereo(_cap_l, _cap_r, flush_n=5)
     if not ret_l or not ret_r:
         return {"found": False, "err": "Failed to read frames", "t_proc": time.perf_counter() - t0}
 
-    # Rectify
     frame_l = cv2.remap(frame_l_orig, _maps_l[0], _maps_l[1], cv2.INTER_LINEAR)
     frame_r = cv2.remap(frame_r_orig, _maps_r[0], _maps_r[1], cv2.INTER_LINEAR)
 
-    # YOLO on both frames
     results_l = _model.predict(frame_l, conf=YOLO_CONF, classes=[BOTTLE_CLASS_ID], verbose=False)
     results_r = _model.predict(frame_r, conf=YOLO_CONF, classes=[BOTTLE_CLASS_ID], verbose=False)
 
@@ -534,10 +502,8 @@ def detect_bottle_once():
             disparity = abs(cx - x_r)
 
             if disparity and disparity > 0:
-                # Standard: calculate_3d_coords returns X,Y,Z in the units implied by calibration T
                 R = 0
                 X, Y, R = calculate_3d_coords(disparity, cx, cy, _Q)
-                # Z =  math.sqrt(R**2 - X**2 - Y**2)
                 Z = R
 
                 alpha = math.atan2(X, Z)
@@ -625,7 +591,7 @@ def bring_bottle():
     drive_distance(found_bottle["Z"], True)
     print("Arrived at bottle location.")
     time.sleep(1)
-    servo_move_step(0)
+    servo_move_step(0)  # close
     time.sleep(1)
     drive_distance(original_z, False)
 
@@ -653,7 +619,7 @@ def bring_bottle_xz():
     drive_distance(math.hypot(found_bottle["Z"], found_bottle["X"]), True)
     print("Arrived at bottle location.")
     time.sleep(1)
-    servo_move_step(0)
+    servo_move_step(0)  # close
     time.sleep(1)
     drive_distance(math.hypot(found_bottle["Z"], found_bottle["X"]), False)
 
@@ -670,22 +636,14 @@ def shutdown_vision():
 
 
 # ============================================================
-# PAYLOAD HANDLER (MATCHES YOUR ESP32 PACKET ENCODING)
-#   dataByte = (flexBits<<4) | (rollBits<<2) | pitchBits
-#
-#   flexPins order on ESP32: {A0, A2, A1, A3}
-#   so:
-#     f0 -> bit0 -> A0
-#     f1 -> bit1 -> A2
-#     f2 -> bit2 -> A1
-#     f3 -> bit3 -> A3
+# PAYLOAD HANDLER
 # ============================================================
 def handle_payload(payload: int):
     global prev_f0, prev_f1, prev_f2, prev_f3
     global _stepper_dir, _last_pkt_t
     global _prev_drive_req, _prev_prev_drive_req, _ultra_override_active, _ultra_override_cmd
 
-    _last_pkt_t = time.time()  # refresh stepper-command validity on every valid packet
+    _last_pkt_t = time.time()
 
     flex = (payload >> 4) & 0x0F
     roll_code = (payload >> 2) & 0x03
@@ -696,43 +654,35 @@ def handle_payload(payload: int):
     f2 = (flex >> 2) & 1
     f3 = (flex >> 3) & 1
 
-    # ------------------------------------------------------------
-    # Special combo: all fingers pressed -> bring bottle
-    # ------------------------------------------------------------
+    # all fingers -> bring bottle
     if (f0 == 1 and f1 == 1 and f2 == 1 and f3 == 1) and not (prev_f0 == 1 and prev_f1 == 1 and prev_f2 == 1 and prev_f3 == 1):
         bring_bottle_xz()
         prev_f0, prev_f1, prev_f2, prev_f3 = f0, f1, f2, f3
         return
 
     # ------------------------------------------------------------
-    # Servo edge detection (now: f3=close, f2=open)
+    # Servo edge detection (f3=close, f2=open)
+    # servo_move_step(0=close, 1=open)
     # ------------------------------------------------------------
     if f3 == 1 and prev_f3 == 0:
-        print("[EVENT] Finger 3 (A3) pressed -> Closing Servo")
-        servo_move_step(1)
-
-    if f2 == 1 and prev_f2 == 0:
-        print("[EVENT] Finger 2 (A1) pressed -> Opening Servo")
+        print("[EVENT] Finger 3 (A3) pressed -> CLOSE Servo")
         servo_move_step(0)
 
-    # ------------------------------------------------------------
-    # Stepper "held" command (now: f0=down, f1=up)
-    #   Movement happens in main loop based on _stepper_dir
-    # ------------------------------------------------------------
+    if f2 == 1 and prev_f2 == 0:
+        print("[EVENT] Finger 2 (A1) pressed -> OPEN Servo")
+        servo_move_step(1)
+
+    # Stepper held command (f0=down, f1=up)
     if f0 == 1 and f1 == 0:
-        _stepper_dir = -1   # down
+        _stepper_dir = -1
     elif f1 == 1 and f0 == 0:
-        _stepper_dir = +1   # up
+        _stepper_dir = +1
     else:
         _stepper_dir = 0
 
-    # update previous states for edge detection
     prev_f0, prev_f1, prev_f2, prev_f3 = f0, f1, f2, f3
 
-    # ------------------------------------------------------------
-    # Decide requested DRIVE command from roll/pitch
-    #   (independent of ultrasonic gating)
-    # ------------------------------------------------------------
+    # DRIVE command from roll/pitch
     if pitch_code == 0b01:
         drive_req = "REV"
     elif pitch_code == 0b10:
@@ -746,61 +696,41 @@ def handle_payload(payload: int):
 
     too_close = obstacle_too_close()
 
-    # ------------------------------------------------------------
-    # Ultrasonic override logic:
-    # Trigger only if too close AND we see: DIR, STOP, DIR
-    # where DIR is FWD/LEFT/RIGHT (NOT reverse).
-    # Then keep override active while holding same DIR.
-    # Turn off override on STOP / REV / direction change.
-    # ------------------------------------------------------------
     allowed_dir = {"FWD", "LEFT", "RIGHT"}
 
-    # Deactivate override if user stops, reverses, or changes direction
     if _ultra_override_active:
         if drive_req in ("STOP", "REV") or drive_req != _ultra_override_cmd:
             _ultra_override_active = False
             _ultra_override_cmd = None
 
-    # Check trigger pattern: (two steps ago == current) and (previous == STOP)
     if (not _ultra_override_active) and too_close and (drive_req in allowed_dir):
         if _prev_drive_req == "STOP" and _prev_prev_drive_req == drive_req:
             _ultra_override_active = True
             _ultra_override_cmd = drive_req
             print(f"[OVERRIDE] Ultrasonic override armed for {drive_req}")
 
-    # Can we move despite obstacle?
     allow_despite_ultra = (_ultra_override_active and (drive_req == _ultra_override_cmd))
 
-    # ------------------------------------------------------------
-    # Apply DC motors (reverse always allowed)
-    # ------------------------------------------------------------
     if drive_req == "REV":
         drive_reverse()
-
     elif drive_req == "FWD":
         if (not too_close) or allow_despite_ultra:
             drive_forward()
         else:
             stop_drive()
-
     elif drive_req == "LEFT":
         if (not too_close) or allow_despite_ultra:
             turn_left()
         else:
             stop_drive()
-
     elif drive_req == "RIGHT":
         if (not too_close) or allow_despite_ultra:
             turn_right()
         else:
             stop_drive()
-
     else:
         stop_drive()
 
-    # ------------------------------------------------------------
-    # Update history of REQUESTED drive commands (not what actually happened)
-    # ------------------------------------------------------------
     _prev_prev_drive_req = _prev_drive_req
     _prev_drive_req = drive_req
 
@@ -813,63 +743,35 @@ def run_glove_loop():
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind((UDP_LISTEN_IP, UDP_PORT))
-    sock.settimeout(0.02)  # faster silence detection
+    sock.settimeout(0.02)
 
     print(f"[RUNNING] Glove UDP + Async Ultrasonic on Port {UDP_PORT}")
 
     last_rx = time.time()
-    _last_pkt_t = time.time()  # initialize to "now" so we don't instantly stale-stop on startup
+    _last_pkt_t = time.time()
 
     while True:
         ultrasonic_tick()
 
-        # ----- Stepper freshness gate: if packets stop, stop stepper immediately -----
         now = time.time()
         if now - _last_pkt_t > STEP_CMD_STALE_SEC:
             if _stepper_dir != 0:
                 _stepper_dir = 0
-                _stepper.deenergize()  # immediate stop (drop coils)
+                _stepper.deenergize()
 
-        # ----- Stepper continuous motion only while command is fresh -----
         if _stepper_dir != 0:
             stepper_tick(_stepper_dir)
 
-        # ----- UDP receive -----
         try:
             data, _ = sock.recvfrom(1024)
             if len(data) >= 3 and data[0] == FRAME_START and data[2] == FRAME_END:
                 handle_payload(data[1])
                 last_rx = time.time()
         except socket.timeout:
-            # Stop DC motors on long silence
             if time.time() - last_rx > SILENCE_STOP_SEC:
                 stop_drive()
 
         time.sleep(CONTROL_PERIOD_SEC)
-
-
-# ============================================================
-# PIN MAPPING (Raspberry Pi, BCM numbering)
-#
-#   Usage                  BCM   Physical pin
-#   ------------------------------------------------
-#   Ultrasonic #1 TRIG      5    pin 29
-#   Ultrasonic #1 ECHO      6    pin 31
-#   Ultrasonic #2 TRIG     13    pin 33
-#   Ultrasonic #2 ECHO     19    pin 35
-#
-#   Servo signal           12    pin 32
-#
-#   Right DC motor RPWM     2    pin 3
-#   Right DC motor LPWM     3    pin 5
-#   Left  DC motor RPWM    20    pin 38
-#   Left  DC motor LPWM    21    pin 40
-#
-#   Stepper IN1            23    pin 16
-#   Stepper IN2            22    pin 15
-#   Stepper IN3            27    pin 13
-#   Stepper IN4            17    pin 11
-# ============================================================
 
 
 # ============================================================
@@ -886,6 +788,11 @@ if __name__ == "__main__":
         shutdown_vision()
         try:
             _stepper.close()
+        except Exception:
+            pass
+        try:
+            # detach servo pulses on exit
+            _servo.value = None
         except Exception:
             pass
         GPIO.cleanup()
