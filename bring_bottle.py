@@ -48,10 +48,13 @@ MATCH_Y_TOL = 10
 
 class YellowJacketEncoder:
     """
-    Quadrature encoder reader for goBILDA Yellow Jacket motor
-    Encoder is on motor shaft (before gearbox)
+    goBILDA Yellow Jacket encoder
+    Spec used directly:
+        384.5 PPR at OUTPUT SHAFT
+        Quadrature decoding -> x4
     """
 
+    # Quadrature transition table
     _TRANS = {
         0b0001: +1, 0b0010: -1,
         0b0100: -1, 0b0111: +1,
@@ -59,22 +62,20 @@ class YellowJacketEncoder:
         0b1101: -1, 0b1110: +1,
     }
 
-    def __init__(self, pi, gpio_a, gpio_b, gear_ratio=13.7):
+    def __init__(self, pi, gpio_a, gpio_b):
         self.pi = pi
         self.gpio_a = gpio_a
         self.gpio_b = gpio_b
 
-        # Yellow Jacket constants
-        self.ppr_motor = 28
-        self.counts_per_rev_motor = self.ppr_motor * 4  # 112 counts/rev (x4)
-        self.gear_ratio = gear_ratio
-        self.counts_per_rev_output = self.counts_per_rev_motor * gear_ratio
+        # ===== SITE SPEC (USED DIRECTLY) =====
+        self.ppr_output = 384.5
+        self.counts_per_rev_output = self.ppr_output * 4  # 1538 counts/rev
 
         self.counts = 0
         self._last_state = 0
         self._t_last = time.time()
         self._c_last = 0
-        self._motor_rpm = 0.0
+        self._output_rpm = 0.0
 
         for g in (gpio_a, gpio_b):
             self.pi.set_mode(g, pigpio.INPUT)
@@ -102,33 +103,27 @@ class YellowJacketEncoder:
             return
 
         dc = self.counts - self._c_last
-        motor_rps = (dc / self.counts_per_rev_motor) / dt
-        self._motor_rpm = 60 * motor_rps
+        rps = (dc / self.counts_per_rev_output) / dt
+        self._output_rpm = 60.0 * rps
 
         self._t_last = t
         self._c_last = self.counts
 
     # ===== Public API =====
-    def motor_rpm(self):
-        return self._motor_rpm
-
-    def output_rpm(self):
-        return self._motor_rpm / self.gear_ratio
-
     def output_revolutions(self):
         return self.counts / self.counts_per_rev_output
+
+    def output_rpm(self):
+        return self._output_rpm
 
     def output_degrees(self):
         return self.output_revolutions() * 360.0
 
     def zero(self):
-        """
-        Reset encoder count to zero and reset RPM window to avoid a spike.
-        """
         self.counts = 0
         self._c_last = 0
         self._t_last = time.time()
-        self._motor_rpm = 0.0
+        self._output_rpm = 0.0
 
     def stop(self):
         self._cba.cancel()
