@@ -69,7 +69,7 @@ class YellowJacketEncoder:
 
         # ===== SITE SPEC (USED DIRECTLY) =====
         self.ppr_output = 384.5
-        self.counts_per_rev_output = self.ppr_output * 4  # 1538 counts/rev
+        self.counts_per_rev_output = self.ppr_output * 16  # 1538 counts/rev
 
         self.counts = 0
         self._last_state = 0
