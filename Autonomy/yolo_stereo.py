@@ -17,6 +17,7 @@ def open_cam(path: str, name: str, w: int, h: int, fps: int):
     if not cap.isOpened():
         return cap
 
+    # Use MJPG to reduce USB bandwidth (usually lowers latency too)
     cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, w)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
@@ -25,7 +26,7 @@ def open_cam(path: str, name: str, w: int, h: int, fps: int):
     # Try to keep buffers tiny (driver may still buffer more, but this helps)
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
-    # Warm up (and flush)
+    # Warm up / flush
     for _ in range(20):
         cap.grab()
 
@@ -39,7 +40,7 @@ def open_cam(path: str, name: str, w: int, h: int, fps: int):
 class LatestStereo:
     """
     Continuously grabs from both cameras and stores ONLY the latest synchronized pair.
-    This is the #1 way to kill multi-second latency on Pi + UVC.
+    This drops old frames and kills multi-second latency.
     """
     def __init__(self, cap_l: cv2.VideoCapture, cap_r: cv2.VideoCapture):
         self.cap_l = cap_l
@@ -62,7 +63,7 @@ class LatestStereo:
 
     def _loop(self):
         while self.running:
-            # Grab both first (better sync, also avoids decode until retrieve)
+            # Grab both first for better sync; retrieve does the decode
             ok_l = self.cap_l.grab()
             ok_r = self.cap_r.grab()
             if not ok_l or not ok_r:
@@ -82,7 +83,12 @@ class LatestStereo:
             return self.latest
 
 
-def load_and_prepare_calibration(file_path, img_size):
+def load_and_prepare_calibration(file_path: str, img_size: tuple[int, int]):
+    """
+    Loads stereo parameters (K, D, R, T, Q) from the .pkl file
+    and computes the rectification maps.
+    img_size must be (width, height).
+    """
     try:
         with open(file_path, 'rb') as f:
             data = pickle.load(f)
@@ -96,6 +102,7 @@ def load_and_prepare_calibration(file_path, img_size):
         Q = data['Q']
     except Exception as e:
         print(f"Error loading calibration file: {e}")
+        print("Ensure keys: cameraMatrix1, distCoeffs1, cameraMatrix2, distCoeffs2, R, T, Q")
         return None, None, None, None
 
     print(f"Using image size: {img_size}")
@@ -110,20 +117,46 @@ def load_and_prepare_calibration(file_path, img_size):
     map1_l, map2_l = cv2.initUndistortRectifyMap(K1, D1, R1, P1, img_size, cv2.CV_32FC1)
     map1_r, map2_r = cv2.initUndistortRectifyMap(K2, D2, R2, P2, img_size, cv2.CV_32FC1)
 
+    print("Stereo calibration loaded and rectification maps created successfully.")
     return (map1_l, map2_l), (map1_r, map2_r), Q, img_size
 
 
-def calculate_3d_coords(disparity, x, y, Q_matrix):
-    # NOTE: disparity sign matters; do NOT abs() if you use Q properly.
-    point = np.array([x, y, disparity, 1], dtype=np.float32)
+def calculate_3d_coords(disparity: float, x: float, y: float, Q_matrix: np.ndarray):
+    """
+    Computes (X, Y, Z) from pixel (x, y) and signed disparity using Q.
+    """
+    point = np.array([x, y, disparity, 1.0], dtype=np.float32)
     hp = Q_matrix @ point
-    w = hp[3]
-    if w == 0:
+    w = float(hp[3])
+    if w == 0.0:
         return (0.0, 0.0, 0.0)
     return (float(hp[0] / w), float(hp[1] / w), float(hp[2] / w))
 
 
+def pick_best_box(results, prefer_center=True):
+    """
+    results: ultralytics Results object (single image)
+    Returns best box or None.
+    """
+    if results is None or results.boxes is None or len(results.boxes) == 0:
+        return None
+
+    # Ultralytics boxes are usually sorted by confidence already, but be explicit:
+    boxes = results.boxes
+    if hasattr(boxes, "conf") and boxes.conf is not None:
+        order = np.argsort(-boxes.conf.cpu().numpy())
+        boxes = boxes[order]
+
+    # If you ever want "most centered" rather than highest conf:
+    if prefer_center:
+        # pick the highest-conf one for now; you can implement a center score if you want
+        return boxes[0]
+
+    return boxes[0]
+
+
 if __name__ == '__main__':
+    # --- CONFIGURATION ---
     ts = datetime.now().strftime("%Y%m%d_%H%M")
     metrics = lib_logger.CSVMetricLogger(
         f"cam_logs/log{ts}.csv",
@@ -135,23 +168,26 @@ if __name__ == '__main__':
     LEFT = "/dev/v4l/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.4:1.0-video-index0"
     RIGHT = "/dev/v4l/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0"
 
-    W, H = 640, 480
+    W = 640
+    H = 480
     CAM_FPS = 15
     IMG_SIZE = (W, H)
 
+    # NCNN model for Pi
     model = YOLO('yolov8n_ncnn_model', task='detect')
-    BOTTLE_CLASS_ID = 39
+
+    BOTTLE_CLASS_ID = 39  # COCO bottle id
 
     cap_l = open_cam(LEFT, "LEFT", W, H, CAM_FPS)
     cap_r = open_cam(RIGHT, "RIGHT", W, H, CAM_FPS)
 
-    maps_l, maps_r, Q_matrix, _ = load_and_prepare_calibration(CALIBRATION_FILE_PATH, IMG_SIZE)
+    maps_l, maps_r, Q_matrix, img_size = load_and_prepare_calibration(CALIBRATION_FILE_PATH, IMG_SIZE)
     if maps_l is None:
         raise SystemExit(1)
 
     stereo = LatestStereo(cap_l, cap_r).start()
 
-    print("Starting YOLOv8 Stereo Detection (low latency).")
+    print("Starting YOLOv8 Stereo Detection (low latency, non-batched NCNN).")
 
     try:
         while True:
@@ -162,43 +198,41 @@ if __name__ == '__main__':
                 continue
 
             tcap, frame_l_orig, frame_r_orig = pack
-            frame_age_s = time.perf_counter() - tcap  # this is your true latency indicator
+            frame_age_s = time.perf_counter() - tcap  # true capture→now latency indicator
 
-            # Rectify
+            # --- Rectify ---
             frame_l_rect = cv2.remap(frame_l_orig, maps_l[0], maps_l[1], cv2.INTER_LINEAR)
             frame_r_rect = cv2.remap(frame_r_orig, maps_r[0], maps_r[1], cv2.INTER_LINEAR)
 
-            # Batched YOLO (one call instead of two)
-            results = model.predict([frame_l_rect, frame_r_rect],
-                                    conf=0.50,
-                                    classes=[BOTTLE_CLASS_ID],
-                                    verbose=False)
-            results_l, results_r = results[0], results[1]
+            # --- YOLO (NO batching because NCNN backend can crash with list input) ---
+            res_l = model.predict(frame_l_rect, conf=0.50, classes=[BOTTLE_CLASS_ID], verbose=False)[0]
+            res_r = model.predict(frame_r_rect, conf=0.50, classes=[BOTTLE_CLASS_ID], verbose=False)[0]
 
             X = Y = Z = None
 
-            if results_l.boxes is not None and len(results_l.boxes) > 0:
-                box_l = results_l.boxes[0]
-                x_l = int(box_l.xywh[0][0].item())
-                y_l = int(box_l.xywh[0][1].item())
+            box_l = pick_best_box(res_l)
+            if box_l is not None:
+                x_l = float(box_l.xywh[0][0].item())
+                y_l = float(box_l.xywh[0][1].item())
 
-                # Find a matching box in right frame by y proximity
-                best = None
-                for box_r in results_r.boxes:
-                    x_r = int(box_r.xywh[0][0].item())
-                    y_r = int(box_r.xywh[0][1].item())
-                    if abs(y_l - y_r) < 10:
-                        best = (x_r, y_r)
-                        break
+                # Find a match in right frame with similar y (epipolar constraint after rectification)
+                best_r = None
+                if res_r.boxes is not None and len(res_r.boxes) > 0:
+                    for box_r in res_r.boxes:
+                        x_r = float(box_r.xywh[0][0].item())
+                        y_r = float(box_r.xywh[0][1].item())
+                        if abs(y_l - y_r) < 10:
+                            best_r = (x_r, y_r)
+                            break
 
-                if best is not None:
-                    x_r, _ = best
+                if best_r is not None:
+                    x_r, _ = best_r
 
-                    # IMPORTANT: use signed disparity for Q reprojection
+                    # Signed disparity is important for Q reprojection
                     disparity = float(x_l - x_r)
 
                     if abs(disparity) > 0.5:
-                        X, Y, Z = calculate_3d_coords(disparity, float(x_l), float(y_l), Q_matrix)
+                        X, Y, Z = calculate_3d_coords(disparity, x_l, y_l, Q_matrix)
                         print(f"X:{X:.1f}  Y:{Y:.1f}  Z:{Z:.1f}   (age {frame_age_s:.3f}s)")
 
             t_total = time.perf_counter() - t0
