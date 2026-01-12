@@ -133,7 +133,7 @@ class YellowJacketEncoder:
 ENC_A = 24  # free
 ENC_B = 25  # free
 pi = pigpio.pi()
-enc = YellowJacketEncoder(pi, ENC_A, ENC_B, gear_ratio=13.7)
+enc = YellowJacketEncoder(pi, ENC_A, ENC_B)
 
 # ============================================================
 # ULTRASONIC SENSOR
