@@ -178,6 +178,7 @@ if __name__ == '__main__':
             box_l = pick_best_box(res_l)
 
             if box_l is not None:
+                print(f"Bottle detected with confidence {box_l.conf.item():.3f}")
                 x_l = float(box_l.xywh[0][0].item())
                 y_l = float(box_l.xywh[0][1].item())
                 y = int(round(y_l))
