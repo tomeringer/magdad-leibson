@@ -446,7 +446,7 @@ def drive_distance(d_cm):
     drive_forward()
     while enc.output_revolutions()*(math.pi*7.2) < d_cm:
         print("Distance traveled: " + str(enc.output_revolutions()*(math.pi*7.2)))
-        time.sleep(0.05)
+        time.sleep(0.01)
         enc.update()
     stop_drive()
 
