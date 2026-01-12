@@ -178,7 +178,7 @@ def servo_move_step(direction):
     global current_pos, servo_is_open
 
     # direction: 1 = close, 0 = open
-    want_close = (direction == 1)
+    want_close = (direction == 0)
 
     # Ignore redundant commands
     if want_close and (not servo_is_open):
