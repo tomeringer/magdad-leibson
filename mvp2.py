@@ -28,7 +28,7 @@ factory = PiGPIOFactory()
 
 # ---- Stepper "continuous feel" ----
 STEPPER_CHUNK = 4                 # keep small so stop feels immediate
-STEPPER_STEP_DELAY_SEC = 0.0005   # was 0.0015
+STEPPER_STEP_DELAY_SEC = 0.001   # was 0.0015
 STEPPER_TICK_SEC = 0.05           # glove sends every 50ms -> match it
 _last_stepper_cmd_t = 0.0
 
