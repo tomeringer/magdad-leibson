@@ -246,10 +246,14 @@ class StepperMotor:
     def __init__(self, pins):
         self.pins, self.pi = pins, pigpio.pi()
         self.seq = [
-            [1, 0, 1, 0],
-            [1, 0, 0, 1],
-            [0, 1, 0, 1],
-            [0, 1, 1, 0]
+            [1, 0, 0, 0],  # A+ only
+            [1, 0, 1, 0],  # A+ and B+
+            [0, 0, 1, 0],  # B+ only
+            [0, 1, 1, 0],  # A- and B+
+            [0, 1, 0, 0],  # A- only
+            [0, 1, 0, 1],  # A- and B-
+            [0, 0, 0, 1],  # B- only
+            [1, 0, 0, 1]  # A+ and B-
         ]
         for p in self.pins: self.pi.set_mode(p, pigpio.OUTPUT)
 
