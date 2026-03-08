@@ -200,7 +200,6 @@ def turn_left(speed: float = 0.5):
     RIGHT_LPWM.value, LEFT_RPWM.value = 0.0, 0.0
 
 
-
 # ============================================================
 # ENCODER & STEPPER
 # ============================================================
@@ -246,7 +245,12 @@ enc = YellowJacketEncoder(pi_enc, 24, 25)
 class StepperMotor:
     def __init__(self, pins):
         self.pins, self.pi = pins, pigpio.pi()
-        self.seq = [[1, 0, 1, 0], [0, 1, 1, 0], [0, 1, 0, 1], [0, 0, 1, 1]]
+        self.seq = [
+            [1, 0, 1, 0],
+            [1, 0, 0, 1],
+            [0, 1, 0, 1],
+            [0, 1, 1, 0]
+        ]
         for p in self.pins: self.pi.set_mode(p, pigpio.OUTPUT)
 
     def step_chunk(self, steps, direction=1, delay_sec=0.002):
@@ -262,7 +266,8 @@ class StepperMotor:
         for p in self.pins: self.pi.write(p, 0)
 
     def close(self):
-        self.deenergize(); self.pi.stop()
+        self.deenergize()
+        self.pi.stop()
 
 
 _stepper = StepperMotor([23, 22, 27, 17])
@@ -458,6 +463,7 @@ def detect_bottle_once():
         "t_proc": t_proc
     }
 
+
 # ============================================================
 # MOTION & AUTONOMY
 # ============================================================
@@ -586,6 +592,7 @@ def bring_bottle_xz():
         print("[AUTO] Timeout: Bottle not found.")
         _red_led_fail_until = time.time() + 5.0
 
+
 def shutdown_vision():
     global _cap_l, _cap_r
     try:
@@ -595,7 +602,8 @@ def shutdown_vision():
             _cap_r.release()
     except Exception:
         pass
-    
+
+
 # ============================================================
 # MAIN LOOP
 # ============================================================
@@ -648,7 +656,8 @@ def handle_payload(payload: int):
     f3 = (flex >> 3) & 1
 
     # ---- autonomy trigger (keep your existing behavior) ----
-    if (f0 == 1 and f1 == 1 and f2 == 1 and f3 == 1) and not (prev_f0 == 1 and prev_f1 == 1 and prev_f2 == 1 and prev_f3 == 1):
+    if (f0 == 1 and f1 == 1 and f2 == 1 and f3 == 1) and not (
+            prev_f0 == 1 and prev_f1 == 1 and prev_f2 == 1 and prev_f3 == 1):
         bring_bottle_xz()
 
     # ---- servo edge detection ----
@@ -738,7 +747,6 @@ def handle_payload(payload: int):
     # ---- update drive history (requested commands) ----
     _prev_prev_drive_req = _prev_drive_req
     _prev_drive_req = drive_req
-
 
 
 if __name__ == "__main__":
