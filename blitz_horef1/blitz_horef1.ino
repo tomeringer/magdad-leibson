@@ -135,7 +135,7 @@ void updateOrientation(float dt, Vec3 &acc, Vec3 &gyr, Vec3 &mag) {
 // ========================================================
 uint8_t readFlexBits() {
   uint8_t bits = 0;
-  Serial.print("Flex (Ω): ");
+  // Serial.print("Flex (Ω): ");
   for (int i = 0; i < NUM_FLEX; i++) {
     long sum = 0;
     for (int k = 0; k < 5; k++) sum += analogRead(flexPins[i]);
@@ -154,7 +154,7 @@ uint8_t readFlexBits() {
     if (fingerFlexed[i]) bits |= (1 << i);
     
     // הדפסת ערכי התנגדות לדיבאג
-    Serial.printf("[%d]:%.0f%s ", i, flexR[i], fingerFlexed[i] ? "!" : ".");
+    // Serial.printf("[%d]:%.0f%s ", i, flexR[i], fingerFlexed[i] ? "!" : ".");
   }
   return bits;
 }
@@ -195,6 +195,9 @@ void setup() {
   }
   Serial.println("\nWiFi Connected!");
 
+  Serial.print("ESP IP: ");
+  Serial.println(WiFi.localIP());
+
   MDNS.begin("esp32-glove");
   resolvedPiIP = MDNS.queryHost(piHostname);
   while (resolvedPiIP.toString() == "0.0.0.0") {
@@ -202,6 +205,11 @@ void setup() {
     resolvedPiIP = MDNS.queryHost(piHostname);
     Serial.println("Resolving Pi IP...");
   }
+
+  Serial.print("Resolved Pi IP: ");
+  Serial.println(resolvedPiIP);
+  Serial.print("UDP destination port: ");
+  Serial.println(udpPort);
 
   udp.begin(udpPort);
   lastTime = micros();
@@ -235,11 +243,11 @@ void loop() {
     uint8_t dataByte = (flexBits << 4) | (rollBits << 2) | pitchBits;
 
     // הדפסת המידע המשודר
-    Serial.print(" | IMU: ");
-    Serial.print(relRoll, 1); Serial.print("/"); Serial.print(relPitch, 1);
-    Serial.print(" | Packet: ");
-    Serial.printf(BYTE_TO_BINARY_PATTERN, BYTE_TO_BINARY(dataByte));
-    Serial.println();
+    // Serial.print(" | IMU: ");
+    // Serial.print(relRoll, 1); Serial.print("/"); Serial.print(relPitch, 1);
+    // Serial.print(" | Packet: ");
+    // Serial.printf(BYTE_TO_BINARY_PATTERN, BYTE_TO_BINARY(dataByte));
+    // Serial.println();
 
     bool isZeroPacket = (dataByte == 0x00);
 
