@@ -198,7 +198,7 @@ def turn_right(speed: float = 0.5):
 
 def turn_left(speed: float = 0.5):
     RIGHT_RPWM.value, LEFT_LPWM.value = speed + 0.01, speed
-    RIGHT_LPWM.value, LEFT_LPWM.value = 0.0, 0.0
+    RIGHT_LPWM.value, LEFT_RPWM.value = 0.0, 0.0
 
 
 
