@@ -402,7 +402,7 @@ def run_glove_loop():
     sock.bind((UDP_LISTEN_IP, UDP_PORT))
     sock.settimeout(0.02)
     last_rx = _last_pkt_t = time.time()
-
+    print(f"debug: Listening for UDP packets on {UDP_LISTEN_IP}:{UDP_PORT}...")
     while True:
         ultrasonic_tick()
 
