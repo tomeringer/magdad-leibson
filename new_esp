@@ -5,9 +5,9 @@
 #include <ESPmDNS.h>
 
 // ========================================================
-//          BYTE → BINARY PRINT
+//          BYTE → BINARY PRINT (עבור הדיבאג)
 // ========================================================
-#define BYTE_TO_BINARY_PATTERN "%c%c%c%c %c%c%c%c"
+#define BYTE_TO_BINARY_PATTERN "%c%c%c%c%c%c%c%c"
 #define BYTE_TO_BINARY(byte)  \
   ((byte) & 0x80 ? '1' : '0'), \
   ((byte) & 0x40 ? '1' : '0'), \
@@ -19,7 +19,7 @@
   ((byte) & 0x01 ? '1' : '0')
 
 // ========================================================
-//                 NETWORK SETUP
+//                  NETWORK SETUP
 // ========================================================
 const char* ssid = "YP";
 const char* password = "ptyair101";
@@ -29,9 +29,6 @@ const int udpPort = 4210;
 WiFiUDP udp;
 IPAddress resolvedPiIP;
 
-// ========================================================
-//                 PACKET FRAMING
-// ========================================================
 constexpr uint8_t START_BYTE = 0xAA;
 constexpr uint8_t END_BYTE   = 0x55;
 
@@ -63,17 +60,21 @@ constexpr float MAG_SCALE_Y = 1.05f;
 constexpr float MAG_SCALE_Z = 1.0f;
 
 // ========================================================
-//                  FLEX SENSORS
+//                  FLEX SENSORS & HYSTERESIS
 // ========================================================
 constexpr int NUM_FLEX = 4;
 int flexPins[NUM_FLEX] = {A0, A2, A1, A3};
 float R_FIXED[NUM_FLEX]  = {47000, 47000, 47000, 47000};
-float R_THRESH[NUM_FLEX] = {60000, 32000, 22000, 22000};
+float R_THRESH[NUM_FLEX] = {60000, 32000, 22000, 30000}; // ה-Vd האופטימלי מהתאוריה
 constexpr float V_IN = 3.3;
 float flexR[NUM_FLEX];
 
+// מרווח היסטרזיס: מונע Bit Flips בגלל רעש סביב ה-Threshold
+constexpr float HYST_MARGIN = 3500.0f; 
+bool fingerFlexed[NUM_FLEX] = {false, false, false, false};
+
 // ========================================================
-//                   DATA STRUCTURES
+//                    DATA STRUCTURES
 // ========================================================
 struct Vec3 { float x, y, z; };
 struct Orientation { float roll, pitch, yaw; };
@@ -85,8 +86,10 @@ unsigned long lastTime = 0;
 unsigned long lastPrintTime = 0;
 constexpr unsigned long SEND_PERIOD_MS = 100;
 
+bool lastPacketWasZero = false;
+
 // ========================================================
-//                      HELPERS
+//                       HELPERS
 // ========================================================
 float wrapAngle(float a) {
   while (a > 180.0f)  a -= 360.0f;
@@ -94,32 +97,17 @@ float wrapAngle(float a) {
   return a;
 }
 
-// ========================================================
-//                      IMU
-// ========================================================
 void readIMU(Vec3 &acc, Vec3 &gyr, Vec3 &mag) {
   if (imu.dataReady()) {
     imu.getAGMT(); 
-    acc = { imu.accX() * ACC_MG_TO_G,
-            imu.accY() * ACC_MG_TO_G,
-            imu.accZ() * ACC_MG_TO_G };
-
-    gyr = { imu.gyrX() - GYRO_BIAS_DPS_X,
-            imu.gyrY() - GYRO_BIAS_DPS_Y,
-            imu.gyrZ() - GYRO_BIAS_DPS_Z };
-
-    mag = { (imu.magX() - MAG_OFF_X) * MAG_SCALE_X,
-            (imu.magY() - MAG_OFF_Y) * MAG_SCALE_Y,
-            (imu.magZ() - MAG_OFF_Z) * MAG_SCALE_Z };
+    acc = { imu.accX() * ACC_MG_TO_G, imu.accY() * ACC_MG_TO_G, imu.accZ() * ACC_MG_TO_G };
+    gyr = { imu.gyrX() - GYRO_BIAS_DPS_X, imu.gyrY() - GYRO_BIAS_DPS_Y, imu.gyrZ() - GYRO_BIAS_DPS_Z };
+    mag = { (imu.magX() - MAG_OFF_X) * MAG_SCALE_X, (imu.magY() - MAG_OFF_Y) * MAG_SCALE_Y, (imu.magZ() - MAG_OFF_Z) * MAG_SCALE_Z };
   }
 }
 
 Orientation accelOrientation(const Vec3 &a) {
-  return {
-    atan2(a.y, a.z) * RAD_TO_DEG,
-    atan2(-a.x, sqrt(a.y*a.y + a.z*a.z)) * RAD_TO_DEG,
-    0.0f
-  };
+  return { atan2(a.y, a.z) * RAD_TO_DEG, atan2(-a.x, sqrt(a.y*a.y + a.z*a.z)) * RAD_TO_DEG, 0.0f };
 }
 
 float magYaw(const Vec3 &m, float roll, float pitch) {
@@ -133,11 +121,9 @@ float magYaw(const Vec3 &m, float roll, float pitch) {
 void updateOrientation(float dt, Vec3 &acc, Vec3 &gyr, Vec3 &mag) {
   readIMU(acc, gyr, mag);
   Orientation accOri = accelOrientation(acc);
-
   ori.roll  += gyr.x * dt;
   ori.pitch += gyr.y * dt;
   ori.yaw   += gyr.z * dt;
-
   float yawMag = magYaw(mag, ori.roll, ori.pitch);
   ori.roll  = wrapAngle(ALPHA_RP  * ori.roll  + (1 - ALPHA_RP)  * accOri.roll);
   ori.pitch = wrapAngle(ALPHA_RP  * ori.pitch + (1 - ALPHA_RP)  * accOri.pitch);
@@ -145,16 +131,30 @@ void updateOrientation(float dt, Vec3 &acc, Vec3 &gyr, Vec3 &mag) {
 }
 
 // ========================================================
-//                      FLEX
+//          FLEX DETECTION WITH HYSTERESIS
 // ========================================================
 uint8_t readFlexBits() {
   uint8_t bits = 0;
+  Serial.print("Flex (Ω): ");
   for (int i = 0; i < NUM_FLEX; i++) {
     long sum = 0;
     for (int k = 0; k < 5; k++) sum += analogRead(flexPins[i]);
     float v = (sum / 5.0f) * (V_IN / 4095.0f);
     flexR[i] = (v > 0.01f) ? R_FIXED[i] * (v / (V_IN - v)) : 0;
-    if (flexR[i] > R_THRESH[i]) bits |= (1 << i);
+
+    // לוגיקת היסטרזיס - החלטה מבוססת מצב קודם ומרחק מהסף
+    if (!fingerFlexed[i]) {
+      // אם היה ישר, צריך לעבור את הסף + המרווח כדי להתכופף
+      if (flexR[i] > (R_THRESH[i] + HYST_MARGIN)) fingerFlexed[i] = true;
+    } else {
+      // אם היה כפוף, צריך לרדת מתחת לסף - המרווח כדי להתיישר
+      if (flexR[i] < (R_THRESH[i] - HYST_MARGIN)) fingerFlexed[i] = false;
+    }
+
+    if (fingerFlexed[i]) bits |= (1 << i);
+    
+    // הדפסת ערכי התנגדות לדיבאג
+    Serial.printf("[%d]:%.0f%s ", i, flexR[i], fingerFlexed[i] ? "!" : ".");
   }
   return bits;
 }
@@ -170,7 +170,7 @@ uint8_t encodeAxis(float angle, float th) {
 // ========================================================
 void setup() {
   Serial.begin(115200);
-  Serial.println("Glove Starts");
+  Serial.println("Glove System - Tower of David Project");
 
   Wire.begin();
   Wire.setClock(400000);
@@ -179,6 +179,7 @@ void setup() {
   while (imu.status != ICM_20948_Stat_Ok) {
     Serial.println("IMU init failed! Retrying...");
     imu.begin(Wire, AD0_VAL);
+    delay(500);
   }
 
   Vec3 acc, gyr, mag;
@@ -199,6 +200,7 @@ void setup() {
   while (resolvedPiIP.toString() == "0.0.0.0") {
     delay(1000);
     resolvedPiIP = MDNS.queryHost(piHostname);
+    Serial.println("Resolving Pi IP...");
   }
 
   udp.begin(udpPort);
@@ -224,38 +226,30 @@ void loop() {
     float relRoll  = wrapAngle(ori.roll  - ref.roll);
     float relPitch = wrapAngle(ori.pitch - ref.pitch);
 
+    // קריאת ביטים (כולל הדפסת הנגדים בתוך הפונקציה)
     uint8_t flexBits  = readFlexBits();
     uint8_t rollBits  = encodeAxis(relRoll,  ROLL_TH);
     uint8_t pitchBits = encodeAxis(relPitch, PITCH_TH);
 
+    // הרכבת החבילה
     uint8_t dataByte = (flexBits << 4) | (rollBits << 2) | pitchBits;
 
-    uint8_t buf[3] = { START_BYTE, dataByte, END_BYTE };
-
-    udp.beginPacket(resolvedPiIP, udpPort);
-    udp.write(buf, sizeof(buf));
-    udp.endPacket();
-
-    // ================= SERIAL DEBUG =================
-    Serial.println("---- MEASUREMENTS ----");
-
-    Serial.printf("ACC  [g]:  %.3f  %.3f  %.3f\n", acc.x, acc.y, acc.z);
-    Serial.printf("GYRO [dps]: %.3f  %.3f  %.3f\n", gyr.x, gyr.y, gyr.z);
-    Serial.printf("MAG  [uT]:  %.1f  %.1f  %.1f\n", mag.x, mag.y, mag.z);
-
-    Serial.printf("ORI  [deg]: R=%.2f  P=%.2f  Y=%.2f\n",
-                  ori.roll, ori.pitch, ori.yaw);
-
-    Serial.printf("REL  [deg]: R=%.2f  P=%.2f\n", relRoll, relPitch);
-
-    Serial.print("FLEX R [ohm]: ");
-    for (int i = 0; i < NUM_FLEX; i++) {
-      Serial.printf("%.0f ", flexR[i]);
-    }
+    // הדפסת המידע המשודר
+    Serial.print(" | IMU: ");
+    Serial.print(relRoll, 1); Serial.print("/"); Serial.print(relPitch, 1);
+    Serial.print(" | Packet: ");
+    Serial.printf(BYTE_TO_BINARY_PATTERN, BYTE_TO_BINARY(dataByte));
     Serial.println();
 
-    Serial.print("DATA = 0b ");
-    Serial.printf(BYTE_TO_BINARY_PATTERN, BYTE_TO_BINARY(dataByte));
-    Serial.println("\n");
+    bool isZeroPacket = (dataByte == 0x00);
+
+    // שליחה ב-UDP
+    if (!(isZeroPacket && lastPacketWasZero)) {
+      uint8_t buf[3] = { START_BYTE, dataByte, END_BYTE };
+      udp.beginPacket(resolvedPiIP, udpPort);
+      udp.write(buf, sizeof(buf));
+      udp.endPacket();
+      lastPacketWasZero = isZeroPacket;
+    }
   }
 }

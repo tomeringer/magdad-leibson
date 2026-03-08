@@ -223,13 +223,13 @@ def drive_reverse():
     RIGHT_RPWM.value, LEFT_RPWM.value = 0.0, 0.0
 
 
-def turn_right():
-    RIGHT_LPWM.value, LEFT_RPWM.value = 0.51, 0.50
+def turn_right(speed: float = 0.5):
+    RIGHT_LPWM.value, LEFT_RPWM.value = speed + 0.01, speed
     RIGHT_RPWM.value, LEFT_LPWM.value = 0.0, 0.0
 
 
-def turn_left():
-    RIGHT_RPWM.value, LEFT_LPWM.value = 0.51, 0.50
+def turn_left(speed: float = 0.5):
+    RIGHT_RPWM.value, LEFT_LPWM.value = speed + 0.01, speed
     RIGHT_LPWM.value, LEFT_RPWM.value = 0.0, 0.0
 
 
@@ -429,6 +429,12 @@ def detect_bottle_once():
                 X, Y, R = calculate_3d_coords(disparity, cx, cy, _Q)
                 # Z =  math.sqrt(R**2 - X**2 - Y**2)
                 Z = R
+
+                alpha = math.atan2(X, Z)
+                r = math.hypot(X, Z)
+                alpha = alpha + math.radians(3)
+                X = math.sin(alpha) * r
+                Z = math.cos(alpha) * r
                 
     t_proc = time.perf_counter() - t0
     return {
@@ -443,6 +449,7 @@ def detect_bottle_once():
 def drive_distance(d_cm, forward: bool):
     enc.zero()
     enc.update()
+    d_cm = d_cm - 1
     if forward:
         drive_forward()
     else:
@@ -454,12 +461,16 @@ def drive_distance(d_cm, forward: bool):
     stop_drive()
 
 def turn_angle(theta_rad, left_turn: bool):
+    theta_rad = theta_rad - math.radians(5)
+    print(theta_rad)
+    enc.zero()
+    enc.update()
     radius = 39.0/2.0
-    segment = radius * theta_rad
+    segment = radius * abs(theta_rad)
     if left_turn:
-        turn_left()
+        turn_left(0.4)
     else:
-        turn_right()
+        turn_right(0.4)
     while abs(enc.output_revolutions())*(math.pi*7.2) < segment:
         print("Distance traveled: " + str(enc.output_revolutions()*(math.pi*7.2)))
         time.sleep(0.01)
@@ -469,7 +480,11 @@ def turn_angle(theta_rad, left_turn: bool):
 
 def bring_bottle():
     time.sleep(3)
+    t0 = time.perf_counter()
     while True:
+        now = time.perf_counter()
+        if now - t0 > 10:
+            break
         found_bottle = detect_bottle_once()
         if found_bottle["found"]:
             print(f"Bottle at X={found_bottle['X']:.2f}, Y={found_bottle['Y']:.2f}, Z={found_bottle['Z']:.2f}")
@@ -482,9 +497,13 @@ def bring_bottle():
         drive_distance(found_bottle["Z"]-35, True)
         print("Approached bottle.")
 
-        time.sleep(2)   
+        time.sleep(2)
+        t0 = time.perf_counter()
         while True:
             found_bottle = detect_bottle_once()
+            now = time.perf_counter()
+            if now - t0 > 10:
+                break
             if found_bottle["found"]:
                 print(f"Bottle at X={found_bottle['X']:.2f}, Y={found_bottle['Y']:.2f}, Z={found_bottle['Z']:.2f}")
                 break
@@ -502,8 +521,12 @@ def bring_bottle():
 def bring_bottle_xz():
     time.sleep(3)
     z0 = 22
+    t0 = time.perf_counter()
     while True:
         found_bottle = detect_bottle_once()
+        now = time.perf_counter()
+        if now - t0 > 10:
+            break
         if found_bottle["found"]:
             print(f"Bottle at X={found_bottle['X']:.2f}, Y={found_bottle['Y']:.2f}, Z={found_bottle['Z']:.2f}")
             original_z = found_bottle['Z']
@@ -521,46 +544,6 @@ def bring_bottle_xz():
     servo_move_step(0)
     time.sleep(1)
     drive_distance(math.hypot(found_bottle["Z"], found_bottle["X"]), False)
-
-
-def bring_bottle_yxz():
-    V = 90  # Forward speed cm/s
-    time.sleep(3)
-    z0 = 22
-    d = 39
-    Y_PARAM = 15
-    wheel_dist = None
-    while True:
-        found_bottle = detect_bottle_once()
-        if found_bottle["found"]:
-            print(f"Bottle at X={found_bottle['X']:.2f}, Y={found_bottle['Y']:.2f}, Z={found_bottle['Z']:.2f}")
-            original_z = found_bottle['Z']
-            break
-        else:
-            print("No bottle detected.")
-    StepperMotor.move(abs((Y_PARAM*found_bottle["Y"])//1), 1)  
-    time.sleep(1)
-
-    while True:
-        found_bottle = detect_bottle_once()
-        if found_bottle["found"]:
-            print(f"Bottle at X={found_bottle['X']:.2f}, Y={found_bottle['Y']:.2f}, Z={found_bottle['Z']:.2f}")
-            original_z = found_bottle['Z']
-            new_z = z0 + original_z
-            alpha = math.atan2(found_bottle['X'], new_z)
-            break
-        else:
-            print("No bottle detected.")
-
-    turn_angle(alpha, alpha < 0)
-    print("Completed turn towards bottle.")
-    drive_distance(math.hypot(found_bottle["Z"], found_bottle["X"]), True)
-    print("Arrived at bottle location.")
-    time.sleep(1)
-    servo_move_step(0)
-    time.sleep(1)
-    drive_distance(math.hypot(found_bottle["Z"], found_bottle["X"]), False)
-
 
 def shutdown_vision():
     global _cap_l, _cap_r
@@ -577,6 +560,8 @@ def drive_2_seconds_forward():
     drive_forward()
     time.sleep(2)
     stop_drive()
+
+
 
 # ============================================================
 # KEYBOARD LOOP
@@ -678,8 +663,8 @@ def run_keyboard_loop():
                 drive_2_seconds_forward()
                 print("[DRIVE] Finished 2 seconds forward.", flush=True)
 
-            elif c == 'g':
-                drive_distance(d_cm=50)
+            elif c == 't':
+                turn_angle(np.pi*2, True)
 
             else:
                 print("[INFO] Unknown command. Use w/s/a/d/x/i/k/u/j/c/q", flush=True)

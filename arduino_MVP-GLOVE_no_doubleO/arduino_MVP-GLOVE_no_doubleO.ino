@@ -85,6 +85,9 @@ unsigned long lastTime = 0;
 unsigned long lastPrintTime = 0;
 constexpr unsigned long SEND_PERIOD_MS = 100;
 
+// ===== MINIMAL ADDITION =====
+bool lastPacketWasZero = false;
+
 // ========================================================
 //                      HELPERS
 // ========================================================
@@ -230,32 +233,16 @@ void loop() {
 
     uint8_t dataByte = (flexBits << 4) | (rollBits << 2) | pitchBits;
 
-    uint8_t buf[3] = { START_BYTE, dataByte, END_BYTE };
+    bool isZeroPacket = (dataByte == 0x00);   // ← minimal addition
 
-    udp.beginPacket(resolvedPiIP, udpPort);
-    udp.write(buf, sizeof(buf));
-    udp.endPacket();
+    if (!(isZeroPacket && lastPacketWasZero)) {
+      uint8_t buf[3] = { START_BYTE, dataByte, END_BYTE };
 
-    // ================= SERIAL DEBUG =================
-    Serial.println("---- MEASUREMENTS ----");
+      udp.beginPacket(resolvedPiIP, udpPort);
+      udp.write(buf, sizeof(buf));
+      udp.endPacket();
 
-    Serial.printf("ACC  [g]:  %.3f  %.3f  %.3f\n", acc.x, acc.y, acc.z);
-    Serial.printf("GYRO [dps]: %.3f  %.3f  %.3f\n", gyr.x, gyr.y, gyr.z);
-    Serial.printf("MAG  [uT]:  %.1f  %.1f  %.1f\n", mag.x, mag.y, mag.z);
-
-    Serial.printf("ORI  [deg]: R=%.2f  P=%.2f  Y=%.2f\n",
-                  ori.roll, ori.pitch, ori.yaw);
-
-    Serial.printf("REL  [deg]: R=%.2f  P=%.2f\n", relRoll, relPitch);
-
-    Serial.print("FLEX R [ohm]: ");
-    for (int i = 0; i < NUM_FLEX; i++) {
-      Serial.printf("%.0f ", flexR[i]);
+      lastPacketWasZero = isZeroPacket;       // ← minimal addition
     }
-    Serial.println();
-
-    Serial.print("DATA = 0b ");
-    Serial.printf(BYTE_TO_BINARY_PATTERN, BYTE_TO_BINARY(dataByte));
-    Serial.println("\n");
   }
 }
