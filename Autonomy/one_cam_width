@@ -1,0 +1,108 @@
+# -*- coding: utf-8 -*-
+import cv2
+import numpy as np
+import pickle
+from ultralytics import YOLO
+
+# ==========================================
+# SETTINGS
+# ==========================================
+CALIBRATION_FILE_PATH = "C:\\Users\\TLP-001\\Desktop\\magdad-leibson\\Autonomy\\stereo_calibration.pkl"
+CAMERA_LEFT_INDEX = 1 
+BOTTLE_CLASS_ID = 39 
+
+# UPDATE THIS: Measure the diameter (width) of your bottle in cm
+BOTTLE_REAL_WIDTH_CM = 6.5  
+
+print("Loading YOLO model...")
+model = YOLO('yolov8n.pt')
+
+# ==========================================
+# FUNCTIONS
+# ==========================================
+
+def load_calibration_and_fx(file_path):
+    """Load stereo parameters, create rectification map, and extract fx."""
+    with open(file_path, 'rb') as f:
+        data = pickle.load(f)
+    
+    K1, D1 = data['cameraMatrix1'], data['distCoeffs1']
+    K2, D2 = data['cameraMatrix2'], data['distCoeffs2']
+    R, T = data['R'], data['T']
+    
+    img_size = (640, 480) 
+    R1, R2, P1, P2, _, _, _ = cv2.stereoRectify(K1, D1, K2, D2, img_size, R, T, alpha=-1)
+    
+    # Create undistortion map for the left camera
+    map_l = cv2.initUndistortRectifyMap(K1, D1, R1, P1, img_size, cv2.CV_32FC1)
+    
+    # Extract the focal length for the X-axis (width) from the Projection Matrix P1
+    fx = P1[0, 0]
+    
+    return map_l, fx
+
+def calculate_distance_by_width(pixel_width, fx):
+    """Calculate distance using the pinhole camera model based on width."""
+    if pixel_width <= 0: return 0
+    return (BOTTLE_REAL_WIDTH_CM * fx) / pixel_width
+
+# ==========================================
+# MAIN LOOP
+# ==========================================
+
+def main():
+    # Automatically get the map and the exact fx from your calibration file
+    map_l, fx = load_calibration_and_fx(CALIBRATION_FILE_PATH)
+    print(f"Calibration loaded. Using fx (Focal Length X): {fx:.2f}")
+    
+    cap_l = cv2.VideoCapture(CAMERA_LEFT_INDEX)
+
+    print("Starting continuous detection on LEFT camera. Press 'q' to stop.")
+
+    while True:
+        ret_l, frame_l = cap_l.read()
+        if not ret_l:
+            print("Error reading from camera.")
+            break
+
+        # Rectify the image to remove lens distortion
+        rect_l = cv2.remap(frame_l, map_l[0], map_l[1], cv2.INTER_LINEAR)
+
+        # Detect bottles
+        res_l = model.predict(rect_l, conf=0.5, classes=[BOTTLE_CLASS_ID], verbose=False)
+
+        current_distance = "N/A"
+
+        if res_l and len(res_l[0].boxes) > 0:
+            # Get data of the first detected bottle
+            box_l = res_l[0].boxes[0]
+            
+            # x_l, y_l = center coordinates. w_l = width in pixels. h_l = height in pixels.
+            x_l, y_l, w_l, h_l = box_l.xywh[0]
+            
+            # Use the WIDTH in pixels (w_l) to calculate distance
+            distance = calculate_distance_by_width(float(w_l), fx)
+            current_distance = f"{distance:.1f} cm"
+            
+            # Print to console for debugging
+            print(f"Pixel Width: {w_l:.1f} | Distance: {distance:.1f} cm")
+            
+            # Draw bounding box and target center on the image
+            cv2.rectangle(rect_l, (int(x_l-w_l/2), int(y_l-h_l/2)), 
+                          (int(x_l+w_l/2), int(y_l+h_l/2)), (0, 255, 0), 2)
+
+        # Visualization
+        cv2.putText(rect_l, f"Distance: {current_distance}", (30, 50), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+        
+        cv2.imshow("Distance Measurement (Width Based)", rect_l)
+
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+
+    # Clean up
+    cap_l.release()
+    cv2.destroyAllWindows()
+
+if __name__ == "__main__":
+    main()
