@@ -336,7 +336,7 @@ def turn_angle(theta_rad, left_turn: bool):
     else:
         turn_right(0.4)
     while abs(enc.output_revolutions()) * (math.pi * 7.2) < seg:
-        time.sleep(0.01);
+        time.sleep(0.01)
         enc.update()
     stop_drive()
 
