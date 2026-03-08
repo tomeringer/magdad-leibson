@@ -23,7 +23,6 @@ from ultralytics import YOLO
 # ============================================================
 # CONFIGURATION
 # ============================================================
-MODE = "GLOVE"
 UDP_LISTEN_IP = "0.0.0.0"
 UDP_PORT = 4210
 FRAME_START = 0xAA
