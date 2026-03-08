@@ -423,10 +423,12 @@ def run_glove_loop():
 
         try:
             data, _ = sock.recvfrom(1024)
+            print(f"debug: Received data: {data.hex()}")
             if len(data) >= 3 and data[0] == FRAME_START and data[2] == FRAME_END:
                 handle_payload(data[1])
                 last_rx = time.time()
         except socket.timeout:
+            print(f"debug: Socket timeout.")
             if time.time() - last_rx > SILENCE_STOP_SEC: stop_drive()
 
         time.sleep(CONTROL_PERIOD_SEC)
