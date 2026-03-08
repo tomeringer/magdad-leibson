@@ -480,6 +480,8 @@ def handle_payload(payload: int):
     else:
         drive_req = "STOP"
 
+    print(f"Received drive request: {drive_req} (payload: {payload:08b})")
+    
     too_close = obstacle_too_close()
 
     # ------------------------------------------------------------
