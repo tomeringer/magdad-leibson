@@ -352,7 +352,7 @@ def turn_angle(theta_rad, left_turn: bool):
         enc.update()
     stop_drive()
 
-def bring_bottle_xz():
+def bring_bottle_xz_13():
     print("[AUTO] Starting detection loop...")
 
     # Ensure gripper is open before starting movement
@@ -371,6 +371,7 @@ def bring_bottle_xz():
 
     if found_bottle["found"]:
         # Success: Turn on green LEDs
+
         GPIO.output(GREEN_LED_PIN, GPIO.LOW)
         time.sleep(1)
 
@@ -405,6 +406,33 @@ def bring_bottle_xz():
         time.sleep(5.0)
         GPIO.output(RED_LED_PIN, GPIO.HIGH)
 
+
+def bring_bottle_xz():
+    time.sleep(2)
+    z0 = 22
+    t0 = time.perf_counter()
+    while True:
+        found_bottle = detect_bottle_once()
+        now = time.perf_counter()
+        if now - t0 > 10:
+            break
+        if found_bottle["found"]:
+            print(f"Bottle at X={found_bottle['X']:.2f}, Y={found_bottle['Y']:.2f}, Z={found_bottle['Z']:.2f}")
+            original_z = found_bottle['Z']
+            new_z = z0 + original_z
+            alpha = math.atan2(found_bottle['X'], new_z)
+            break
+        else:
+            print("No bottle detected.")
+
+    turn_angle(alpha, alpha < 0)
+    print("Completed turn towards bottle.")
+    drive_distance(math.hypot(found_bottle["Z"], found_bottle["X"]), True)
+    print("Arrived at bottle location.")
+    time.sleep(1)
+    servo_move_step(0)
+    time.sleep(1)
+    drive_distance(math.hypot(found_bottle["Z"], found_bottle["X"]), False)
 
 def track_bottle_continuous():
     # Run continuous detection loop. Press Ctrl+C to exit this loop.
