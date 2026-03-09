@@ -246,29 +246,51 @@ enc = YellowJacketEncoder(pi_enc, 24, 25)
 
 class StepperMotor:
     def __init__(self, pins):
-        self.pins, self.pi = pins, pigpio.pi()
+        self.pins = pins
+        self.pi = pigpio.pi()
+
+        # two-coil full-step sequence for stronger holding
         self.seq = [
-            [1, 0, 1, 0],
-            [1, 0, 0, 1],
-            [0, 1, 0, 1],
-            [0, 1, 1, 0]
+            [1, 0, 1, 0], # Phase 1
+            [0, 1, 1, 0], # Phase 2
+            [0, 1, 0, 1], # Phase 3
+            [1, 0, 0, 1]  # Phase 4
         ]
-        for p in self.pins: self.pi.set_mode(p, pigpio.OUTPUT)
+
+        self.current_idx = 0
+
+        for p in self.pins:
+            self.pi.set_mode(p, pigpio.OUTPUT)
+
+        self._write_step(self.current_idx)
+
+    def _write_step(self, idx):
+        self.current_idx = idx % 4
+        for i, p in enumerate(self.pins):
+            self.pi.write(p, self.seq[self.current_idx][i])
 
     def step_chunk(self, steps, direction=1, delay_sec=0.002):
         direction = 1 if direction >= 0 else -1
+
         for _ in range(int(steps)):
-            for step in range(4):
-                idx = step if direction == 1 else 3 - step
-                for i, p in enumerate(self.pins): self.pi.write(p, self.seq[idx][i])
-                time.sleep(delay_sec)
-        self.deenergize()
+            self.current_idx = (self.current_idx + direction) % 4
+            self._write_step(self.current_idx)
+            time.sleep(delay_sec)
+
+        # IMPORTANT:
+        # do NOT deenergize here.
+        # stay on the last full-step state to keep holding torque.
+
+    def hold(self):
+        self._write_step(self.current_idx)
 
     def deenergize(self):
-        for p in self.pins: self.pi.write(p, 0)
+        for p in self.pins:
+            self.pi.write(p, 0)
 
     def close(self):
-        self.deenergize(); self.pi.stop()
+        self.deenergize()
+        self.pi.stop()
 
 
 _stepper = StepperMotor([23, 22, 27, 17])
@@ -423,8 +445,9 @@ def run_glove_loop():
             GPIO.output(RED_LED_PIN, GPIO.HIGH)  # ×›×‘×•×™
 
         if now - _last_pkt_t > STEP_CMD_STALE_SEC:
-            if _stepper_dir != 0: _stepper_dir = 0; _stepper.deenergize()
-
+            if _stepper_dir != 0:
+                _stepper_dir = 0
+                _stepper.hold()
         if _stepper_dir != 0: stepper_tick(_stepper_dir)
 
         try:
@@ -546,13 +569,14 @@ def handle_payload(payload: int):
 
 if __name__ == "__main__":
     try:
-        init_vision();
+        init_vision()
         run_glove_loop()
     except KeyboardInterrupt:
         pass
     finally:
         stop_drive()
-        GPIO.output(RED_LED_PIN, GPIO.HIGH);
+        _stepper.deenergize()
+        GPIO.output(RED_LED_PIN, GPIO.HIGH)
         GPIO.output(GREEN_LED_PIN, GPIO.HIGH)
-        GPIO.cleanup();
+        GPIO.cleanup()
         print("\n[OFF] System Stopped.")
