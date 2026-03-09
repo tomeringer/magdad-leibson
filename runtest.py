@@ -233,7 +233,7 @@ def init_vision():
         return
 
     print("[VISION] Initializing YOLO + stereo...", flush=True)
-    _model = YOLO('yolov8n_ncnn_model', task='detect')
+    _model = YOLO('Autonomy/yolov8n_ncnn_model', task='detect')
 
     _cap_l = open_cam(LEFT_CAM, "LEFT")
     _cap_r = open_cam(RIGHT_CAM, "RIGHT")
@@ -435,7 +435,7 @@ if __name__ == "__main__":
             if cmd == 'c':
                 bring_bottle_xz()
             elif cmd == 'b':
-                track_bottle_continuous
+                track_bottle_continuous()
             elif cmd == 'q':
                 break
                 
