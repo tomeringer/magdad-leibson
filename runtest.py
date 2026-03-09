@@ -4,9 +4,6 @@
 import os
 os.environ['PIGPIO_ADDR'] = 'localhost'
 
-from flask import Flask, Response
-import threading
-
 import time
 import pigpio
 import RPi.GPIO as GPIO
@@ -426,82 +423,53 @@ def track_bottle_continuous_without_cam():
         print("\n[VISION] Tracking stopped. Returning to menu.")
 
 
-
-# ============================================================
-# WEB STREAMING SERVER (FLASK)
-# ============================================================
-app = Flask(__name__)
-_stream_frame = None
-_is_tracking = False
-
-def generate_frames():
-    global _stream_frame, _is_tracking
-    while True:
-        if not _is_tracking:
-            time.sleep(0.5)
-            continue
-            
-        if _stream_frame is not None:
-            # Encode the combined frame as JPEG
-            ret, buffer = cv2.imencode('.jpg', _stream_frame)
-            if ret:
-                frame = buffer.tobytes()
-                # Yield the frame in multipart format for web streaming
-                yield (b'--frame\r\n'
-                       b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
-        else:
-            time.sleep(0.05)
-
-@app.route('/')
-def video_feed():
-    return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
-
-def start_flask_server():
-    # Suppress normal Flask terminal output to keep your console clean
-    import logging
-    log = logging.getLogger('werkzeug')
-    log.setLevel(logging.ERROR)
-    
-    # Run the server on port 5000
-    app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False)
-
 def track_bottle_continuous():
-    global _stream_frame, _is_tracking
-    _is_tracking = True
+    print("\n[VISION] Starting continuous tracking.")
+    print("Press 'q' in the video window OR Ctrl+C in terminal to return to menu.")
     
-    print("\n[VISION] Continuous tracking started!")
-    print(">>> Open your computer's browser and go to: http://<RASPBERRY_PI_IP>:5000")
-    print(">>> Press Ctrl+C in this terminal to stop tracking and return to menu.\n")
+    # Create a named window so we can control it
+    cv2.namedWindow("Stereo Vision", cv2.WINDOW_AUTOSIZE)
     
     try:
         while True:
             bottle = detect_bottle_once()
             
+            # Extract the frames from the dictionary
             frame_l = bottle.get("frame_l")
             frame_r = bottle.get("frame_r")
             
             if bottle["found"]:
                 print(f"Bottle Location -> X: {bottle['X']:.2f}, Y: {bottle['Y']:.2f}, Z: {bottle['Z']:.2f}")
                 
-                # Draw green circle and text on the left frame
+                # Draw a green circle and the coordinates on the left frame
                 if frame_l is not None:
                     cx, cy = bottle["cx"], bottle["cy"]
                     cv2.circle(frame_l, (cx, cy), 10, (0, 255, 0), -1)
                     cv2.putText(frame_l, f"X:{bottle['X']:.1f} Z:{bottle['Z']:.1f}", 
                                 (cx - 40, cy - 20), 
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-            
-            # Combine left and right frames and update the global stream variable
-            if frame_l is not None and frame_r is not None:
-                _stream_frame = np.hstack((frame_l, frame_r))
+            else:
+                print("Bottle not found...")
                 
-            time.sleep(0.05)  # Delay to prevent CPU overload
+            # If we successfully got frames, display them
+            if frame_l is not None and frame_r is not None:
+                # Put the left and right cameras side-by-side
+                combined_view = np.hstack((frame_l, frame_r))
+                cv2.imshow("Stereo Vision", combined_view)
+            
+            # Wait 1ms to refresh the GUI. If 'q' is pressed, break the loop.
+            key = cv2.waitKey(1) & 0xFF
+            if key == ord('q'):
+                print("\n[VISION] 'q' pressed. Exiting tracking.")
+                break
+                
+            time.sleep(0.05)  # Small delay to keep the terminal readable
             
     except KeyboardInterrupt:
-        print("\n[VISION] Tracking stopped via Ctrl+C. Returning to menu...")
+        print("\n[VISION] Tracking stopped via Ctrl+C.")
     finally:
-        _is_tracking = False
-        _stream_frame = None
+        # Safely close the OpenCV window when exiting the function
+        cv2.destroyWindow("Stereo Vision")
 
 
 # ============================================================
@@ -510,20 +478,15 @@ def track_bottle_continuous():
 if __name__ == "__main__":
     try:
         init_vision()
-        
-        # Start the Flask web server in a background thread
-        threading.Thread(target=start_flask_server, daemon=True).start()
-        
         print("\n--- SYSTEM READY ---")
         print("Type 'c' and press Enter to start bringing the bottle.")
-        print("Type 't' and press Enter to continuously track the bottle (Web Stream).")
         print("Type 'q' and press Enter to quit.\n")
         
         while True:
-            cmd = input("Command (c/t/q): ").strip().lower()
+            cmd = input("Command (c/q): ").strip().lower()
             if cmd == 'c':
                 bring_bottle_xz()
-            elif cmd == 't':
+            elif cmd == 'b':
                 track_bottle_continuous()
             elif cmd == 'q':
                 break
