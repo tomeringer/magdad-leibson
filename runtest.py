@@ -27,7 +27,7 @@ factory = PiGPIOFactory()
 # ---- Stereo / YOLO config ----
 CALIBRATION_FILE_PATH = r"Autonomy/stereo_calibration.pkl"
 LEFT_CAM = "/dev/v4l/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.4:1.0-video-index0"
-RIGHT_CAM = "/dev/v4l/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0"
+RIGHT_CAM = "/dev/v4l/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.1:1.0-video-index0"
 
 W = 640
 H = 480
