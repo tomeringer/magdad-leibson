@@ -28,8 +28,8 @@ factory = PiGPIOFactory()
 CALIBRATION_FILE_PATH = r"Autonomy/stereo_calibration.pkl"
 LEFT_CAM = "/dev/v4l/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.4:1.0-video-index0"
 RIGHT_CAM = "/dev/v4l/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.1:1.0-video-index0"
-LEFT_CAM = 0
-RIGHT_CAM = 2
+# LEFT_CAM = 0
+# RIGHT_CAM = 2
 
 W = 640
 H = 480
@@ -351,61 +351,6 @@ def turn_angle(theta_rad, left_turn: bool):
         time.sleep(0.01)
         enc.update()
     stop_drive()
-
-def bring_bottle_xz_13():
-    print("[AUTO] Starting detection loop...")
-
-    # Ensure gripper is open before starting movement
-    servo_move_step(0)
-    time.sleep(1)
-
-    start_time = time.time()
-    found_bottle = {"found": False}
-
-    # Detection loop for 5 seconds to minimize detection errors (BER)
-    while (time.time() - start_time) < 5.0:
-        found_bottle = detect_bottle_once()
-        if found_bottle["found"]:
-            break
-        time.sleep(0.1)
-
-    if found_bottle["found"]:
-        # Success: Turn on green LEDs
-
-        GPIO.output(GREEN_LED_PIN, GPIO.LOW)
-        time.sleep(1)
-
-        # Turn off green LEDs right before driving
-        GPIO.output(GREEN_LED_PIN, GPIO.HIGH)
-
-        # Movement and grasping sequence
-        alpha = math.atan2(found_bottle['X'], 22 + found_bottle['Z'])
-        turn_angle(alpha, alpha < 0)
-        drive_distance(math.hypot(found_bottle["Z"], found_bottle["X"]), True)
-
-        time.sleep(1)
-        servo_move_step(1)  # Close gripper
-        time.sleep(1)
-
-        # Raise arm 30 degrees (170 steps)
-        _stepper.step_chunk(170, direction=1, delay_sec=STEPPER_STEP_DELAY_SEC)
-        time.sleep(0.5)
-
-        drive_distance(math.hypot(found_bottle["Z"], found_bottle["X"]), False)
-
-        # Lower arm back down
-        _stepper.step_chunk(170, direction=-1, delay_sec=STEPPER_STEP_DELAY_SEC)
-        time.sleep(0.5)
-
-        servo_move_step(0)  # Release gripper
-        time.sleep(1)
-    else:
-        # Failure: Turn on red LED for 5 seconds directly
-        print("[AUTO] Timeout: Bottle not found.")
-        GPIO.output(RED_LED_PIN, GPIO.LOW)
-        time.sleep(5.0)
-        GPIO.output(RED_LED_PIN, GPIO.HIGH)
-
 
 def bring_bottle_xz():
     time.sleep(2)
