@@ -32,9 +32,9 @@ FRAME_END = 0x55
 CONTROL_PERIOD_SEC = 0.01
 SILENCE_STOP_SEC = 0.7
 
-# --- הגדרות LED (PNP BC327) ---
-RED_LED_PIN = 26  # אדומים - מכשול (אולטרסוני) + חיווי כשל
-GREEN_LED_PIN = 16  # ירוקים - זיהוי חפץ (עיבוד תמונה)
+# --- ×”×’×“×¨×•×ª LED (PNP BC327) ---
+RED_LED_PIN = 26  # ××“×•×ž×™× - ×ž×›×©×•×œ (××•×œ×˜×¨×¡×•× ×™) + ×—×™×•×•×™ ×›×©×œ
+GREEN_LED_PIN = 16  # ×™×¨×•×§×™× - ×–×™×”×•×™ ×—×¤×¥ (×¢×™×‘×•×“ ×ª×ž×•× ×”)
 # ------------------------------
 
 factory = PiGPIOFactory()
@@ -73,7 +73,7 @@ _prev_prev_drive_req = "STOP"
 _ignore_ultra_active = False
 _ignore_ultra_cmd = None
 
-# טיימר עבור חיווי האדום במקרה של כשל בזיהוי
+# ×˜×™×™×ž×¨ ×¢×‘×•×¨ ×—×™×•×•×™ ×”××“×•× ×‘×ž×§×¨×” ×©×œ ×›×©×œ ×‘×–×™×”×•×™
 _red_led_fail_until = 0.0
 
 # ============================================================
@@ -90,7 +90,7 @@ GPIO.setup(US1_ECHO, GPIO.IN)
 GPIO.setup(US2_TRIG, GPIO.OUT)
 GPIO.setup(US2_ECHO, GPIO.IN)
 
-# אתחול לדים (PNP: HIGH = OFF)
+# ××ª×—×•×œ ×œ×“×™× (PNP: HIGH = OFF)
 GPIO.setup(RED_LED_PIN, GPIO.OUT, initial=GPIO.HIGH)
 GPIO.setup(GREEN_LED_PIN, GPIO.OUT, initial=GPIO.HIGH)
 
@@ -247,7 +247,12 @@ enc = YellowJacketEncoder(pi_enc, 24, 25)
 class StepperMotor:
     def __init__(self, pins):
         self.pins, self.pi = pins, pigpio.pi()
-        self.seq = [[1, 0, 1, 0], [0, 1, 1, 0], [0, 1, 0, 1], [0, 0, 1, 1]]
+        self.seq = [
+            [1, 0, 1, 0],
+            [1, 0, 0, 1],
+            [0, 1, 0, 1],
+            [0, 1, 1, 0]
+        ]
         for p in self.pins: self.pi.set_mode(p, pigpio.OUTPUT)
 
     def step_chunk(self, steps, direction=1, delay_sec=0.002):
@@ -307,7 +312,7 @@ def detect_bottle_once():
     res = _model.predict(f_rect, conf=YOLO_CONF, classes=[BOTTLE_CLASS_ID], verbose=False)
     X = Z = None
     if res and len(res[0].boxes) > 0:
-        X, Y, Z = 0, 0, 100  # Placeholder לערכי עומק אמיתיים
+        X, Y, Z = 0, 0, 100  # Placeholder ×œ×¢×¨×›×™ ×¢×•×ž×§ ××ž×™×ª×™×™×
     return {"found": X is not None, "X": X, "Z": Z}
 
 
@@ -336,7 +341,7 @@ def turn_angle(theta_rad, left_turn: bool):
     else:
         turn_right(0.4)
     while abs(enc.output_revolutions()) * (math.pi * 7.2) < seg:
-        time.sleep(0.01)
+        time.sleep(0.01);
         enc.update()
     stop_drive()
 
@@ -345,14 +350,14 @@ def bring_bottle_xz():
     global _red_led_fail_until
     print("[AUTO] Starting detection loop...")
 
-    # וידוא צבת פתוחה לפני תחילת התנועה
+    # ×•×™×“×•× ×¦×‘×ª ×¤×ª×•×—×” ×œ×¤× ×™ ×ª×—×™×œ×ª ×”×ª× ×•×¢×”
     servo_move_step(0)
     time.sleep(1)
 
     start_time = time.time()
     found_bottle = {"found": False}
 
-    # לולאת ניסיונות זיהוי למשך 5 שניות למזעור שגיאות גילוי (BER) [cite: 13, 42]
+    # ×œ×•×œ××ª × ×™×¡×™×•× ×•×ª ×–×™×”×•×™ ×œ×ž×©×š 5 ×©× ×™×•×ª ×œ×ž×–×¢×•×¨ ×©×’×™××•×ª ×’×™×œ×•×™ (BER) [cite: 13, 42]
     while (time.time() - start_time) < 5.0:
         found_bottle = detect_bottle_once()
         if found_bottle["found"]:
@@ -360,36 +365,36 @@ def bring_bottle_xz():
         time.sleep(0.1)
 
     if found_bottle["found"]:
-        # הצלחה: הדלקת לדים ירוקים
+        # ×”×¦×œ×—×”: ×”×“×œ×§×ª ×œ×“×™× ×™×¨×•×§×™×
         GPIO.output(GREEN_LED_PIN, GPIO.LOW)
         time.sleep(1)
 
-        # כיבוי לדים ירוקים רגע לפני תחילת הנסיעה
+        # ×›×™×‘×•×™ ×œ×“×™× ×™×¨×•×§×™× ×¨×’×¢ ×œ×¤× ×™ ×ª×—×™×œ×ª ×”× ×¡×™×¢×”
         GPIO.output(GREEN_LED_PIN, GPIO.HIGH)
 
-        # רצף תנועה ותפיסה
+        # ×¨×¦×£ ×ª× ×•×¢×” ×•×ª×¤×™×¡×”
         alpha = math.atan2(found_bottle['X'], 22 + found_bottle['Z'])
         turn_angle(alpha, alpha < 0)
         drive_distance(math.hypot(found_bottle["Z"], found_bottle["X"]), True)
 
         time.sleep(1)
-        servo_move_step(1)  # סגירה
+        servo_move_step(1)  # ×¡×’×™×¨×”
         time.sleep(1)
 
-        # הרמת זרוע 30 מעלות (170 צעדים)
+        # ×”×¨×ž×ª ×–×¨×•×¢ 30 ×ž×¢×œ×•×ª (170 ×¦×¢×“×™×)
         _stepper.step_chunk(170, direction=1, delay_sec=STEPPER_STEP_DELAY_SEC)
         time.sleep(0.5)
 
         drive_distance(math.hypot(found_bottle["Z"], found_bottle["X"]), False)
 
-        # הורדת זרוע חזרה
+        # ×”×•×¨×“×ª ×–×¨×•×¢ ×—×–×¨×”
         _stepper.step_chunk(170, direction=-1, delay_sec=STEPPER_STEP_DELAY_SEC)
         time.sleep(0.5)
 
-        servo_move_step(0)  # שחרור
+        servo_move_step(0)  # ×©×—×¨×•×¨
         time.sleep(1)
     else:
-        # כשל: הגדרת טיימר ללדים אדומים למשך 5 שניות
+        # ×›×©×œ: ×”×’×“×¨×ª ×˜×™×™×ž×¨ ×œ×œ×“×™× ××“×•×ž×™× ×œ×ž×©×š 5 ×©× ×™×•×ª
         print("[AUTO] Timeout: Bottle not found.")
         _red_led_fail_until = time.time() + 5.0
 
@@ -409,13 +414,13 @@ def run_glove_loop():
 
         now = time.time()
         too_close = obstacle_too_close()
-        # חיווי אדום אם יש מכשול או אם יש כשל זיהוי בטיימר
+        # ×—×™×•×•×™ ××“×•× ×× ×™×© ×ž×›×©×•×œ ××• ×× ×™×© ×›×©×œ ×–×™×”×•×™ ×‘×˜×™×™×ž×¨
         fail_active = (now < _red_led_fail_until)
 
         if too_close or fail_active:
-            GPIO.output(RED_LED_PIN, GPIO.LOW)  # דולק (PNP)
+            GPIO.output(RED_LED_PIN, GPIO.LOW)  # ×“×•×œ×§ (PNP)
         else:
-            GPIO.output(RED_LED_PIN, GPIO.HIGH)  # כבוי
+            GPIO.output(RED_LED_PIN, GPIO.HIGH)  # ×›×‘×•×™
 
         if now - _last_pkt_t > STEP_CMD_STALE_SEC:
             if _stepper_dir != 0: _stepper_dir = 0; _stepper.deenergize()
