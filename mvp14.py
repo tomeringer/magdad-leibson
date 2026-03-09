@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import os
+
 os.environ['PIGPIO_ADDR'] = 'localhost'
 
 import time
@@ -11,8 +12,6 @@ import RPi.GPIO as GPIO
 from typing import Optional
 from gpiozero import PWMOutputDevice, Servo
 from gpiozero.pins.pigpio import PiGPIOFactory
-
-
 
 import math
 import pickle
@@ -24,7 +23,6 @@ from ultralytics import YOLO
 # ============================================================
 # CONFIGURATION
 # ============================================================
-MODE = "GLOVE"
 UDP_LISTEN_IP = "0.0.0.0"
 UDP_PORT = 4210
 FRAME_START = 0xAA
@@ -33,14 +31,16 @@ FRAME_END = 0x55
 CONTROL_PERIOD_SEC = 0.01
 SILENCE_STOP_SEC = 0.7
 
+# --- ×”×’×“×¨×•×ª LED (PNP BC327) ---
+RED_LED_PIN = 26  # ××“×•×ž×™× - ×ž×›×©×•×œ (××•×œ×˜×¨×¡×•× ×™) + ×—×™×•×•×™ ×›×©×œ
+GREEN_LED_PIN = 16  # ×™×¨×•×§×™× - ×–×™×”×•×™ ×—×¤×¥ (×¢×™×‘×•×“ ×ª×ž×•× ×”)
+# ------------------------------
+
 factory = PiGPIOFactory()
 
 # ---- Stereo / YOLO config ----
-
 CALIBRATION_FILE_PATH = r"Autonomy/stereo_calibration.pkl"
-
 LEFT_CAM = "/dev/v4l/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.4:1.0-video-index0"
-
 RIGHT_CAM = "/dev/v4l/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0"
 
 W = 640
@@ -48,49 +48,35 @@ H = 480
 CAM_FPS = 15
 DEFAULT_IMG_SIZE = (W, H)
 
-# COCO bottle class
 BOTTLE_CLASS_ID = 39
 YOLO_CONF = 0.50
-
-# Epipolar match tolerance in rectified images
-
 MATCH_Y_TOL = 10
 
-# ---- Stepper "continuous feel" ----
-STEPPER_CHUNK = 4                 # keep small so stop feels immediate
-STEPPER_STEP_DELAY_SEC = 0.0015   # was 0.0015
-STEPPER_TICK_SEC = 0.05           # glove sends every 50ms -> match it
+# ---- Stepper config ----
+STEPPER_CHUNK = 4
+STEPPER_STEP_DELAY_SEC = 0.0015
+STEPPER_TICK_SEC = 0.05
 _last_stepper_cmd_t = 0.0
-
-# ---- Stepper command freshness gate (Choice #1) ----
-STEP_CMD_STALE_SEC = 0.12         # if no valid packets for this long -> stop stepper immediately
-_stepper_dir = 0                  # -1, 0, +1 (desired direction while held)
-_last_pkt_t = 0.0                 # last time we received a valid framed packet
+STEP_CMD_STALE_SEC = 0.12
+_stepper_dir = 0
+_last_pkt_t = 0.0
 sock = None
 last_rx = 0.0
 
 # ============================================================
-# GLOBAL STATE (edge-detected)
+# GLOBAL STATE
 # ============================================================
 prev_f0 = prev_f1 = prev_f2 = prev_f3 = 0
-# ============================================================
-# DRIVE HISTORY (for ultrasonic override pattern)
-#   Pattern to override ultrasonic "too close":
-#     <DIR>, STOP, <DIR>   where DIR in {FWD, LEFT, RIGHT}
-#   Once triggered, override stays active while holding the same DIR,
-#   and turns off when you STOP, REVERSE, or change direction.
-# ============================================================
 _prev_drive_req = "STOP"
 _prev_prev_drive_req = "STOP"
-
-# Ignore-ultrasonic mode: armed by X,0,X. Disabled by STOP(0) or REV.
 _ignore_ultra_active = False
-_ignore_ultra_cmd = None  # "FWD"/"LEFT"/"RIGHT"
+_ignore_ultra_cmd = None
 
-
+# ×˜×™×™×ž×¨ ×¢×‘×•×¨ ×—×™×•×•×™ ×”××“×•× ×‘×ž×§×¨×” ×©×œ ×›×©×œ ×‘×–×™×”×•×™
+_red_led_fail_until = 0.0
 
 # ============================================================
-# ULTRASONIC SENSORS (ASYNC)
+# ULTRASONIC SENSORS & GPIO SETUP
 # ============================================================
 US1_TRIG, US1_ECHO = 5, 6
 US2_TRIG, US2_ECHO = 13, 19
@@ -102,6 +88,10 @@ GPIO.setup(US1_TRIG, GPIO.OUT)
 GPIO.setup(US1_ECHO, GPIO.IN)
 GPIO.setup(US2_TRIG, GPIO.OUT)
 GPIO.setup(US2_ECHO, GPIO.IN)
+
+# ××ª×—×•×œ ×œ×“×™× (PNP: HIGH = OFF)
+GPIO.setup(RED_LED_PIN, GPIO.OUT, initial=GPIO.HIGH)
+GPIO.setup(GREEN_LED_PIN, GPIO.OUT, initial=GPIO.HIGH)
 
 GPIO.output(US1_TRIG, GPIO.LOW)
 GPIO.output(US2_TRIG, GPIO.LOW)
@@ -118,17 +108,12 @@ def _measure_distance_cm(trig, echo) -> Optional[float]:
     GPIO.output(trig, True)
     time.sleep(0.00001)
     GPIO.output(trig, False)
-
     t0 = time.time()
     while GPIO.input(echo) == 0:
-        if time.time() - t0 > US_TIMEOUT_SEC:
-            return None
-
+        if time.time() - t0 > US_TIMEOUT_SEC: return None
     ps = time.time()
     while GPIO.input(echo) == 1:
-        if time.time() - ps > US_TIMEOUT_SEC:
-            return None
-
+        if time.time() - ps > US_TIMEOUT_SEC: return None
     pe = time.time()
     return (pe - ps) * 17150.0
 
@@ -151,12 +136,10 @@ def obstacle_too_close() -> bool:
     return False
 
 
-
-# --- הגדרות חומרה ---
+# ============================================================
+# SERVO & MOTORS
+# ============================================================
 SERVO_PIN = 12
-factory = PiGPIOFactory()
-
-# הפתרון כאן: initial_value=None גורם למנוע לא לזוז בכלל כשהקוד עולה
 servo = Servo(
     SERVO_PIN,
     initial_value=None,
@@ -165,57 +148,32 @@ servo = Servo(
     pin_factory=factory
 )
 
-# --- הגדרות תנועה ---
-MOVE_STEP = 0.39  # 70 מעלות עבור מנוע 360
-
-# אנחנו מתחילים ב-0, אבל המנוע לא ידע מזה עד הלחיצה הראשונה
+MOVE_STEP = 0.39
 current_pos = 0.0
-# Servo logical state (start OPEN)
 servo_is_open = True
 
 
 def servo_move_step(direction):
     global current_pos, servo_is_open
-
-    # direction: 1 = close, 0 = open
     want_close = (direction == 1)
+    if want_close and (not servo_is_open): return
+    if (not want_close) and servo_is_open: return
 
-    # Ignore redundant commands
-    if want_close and (not servo_is_open):
-        print(">> Servo already CLOSED - ignoring close command")
-        return
-    if (not want_close) and servo_is_open:
-        print(">> Servo already OPEN - ignoring open command")
-        return
-
-    #new_val = current_pos
-    # Apply one step
     if want_close:
         new_val = current_pos + MOVE_STEP
     else:
-         new_val = current_pos - MOVE_STEP
+        new_val = current_pos - MOVE_STEP
 
-    # Clamp
-    if new_val > 1.0: new_val = 1.0
-    if new_val < -1.0: new_val = -1.0
-
+    new_val = max(-1.0, min(1.0, new_val))
     current_pos = new_val
     servo.value = current_pos
-
-    # Update logical state only if we actually moved
     servo_is_open = (not want_close)
 
-    state_str = "OPEN" if servo_is_open else "CLOSED"
-    print(f">> Servo moved to {current_pos:.2f} | state={state_str}")
 
-
-# ============================================================
-# DC MOTORS
-# ============================================================
 RIGHT_RPWM = PWMOutputDevice(2, frequency=1000, initial_value=0, pin_factory=factory)
 RIGHT_LPWM = PWMOutputDevice(3, frequency=1000, initial_value=0, pin_factory=factory)
-LEFT_RPWM  = PWMOutputDevice(20, frequency=1000, initial_value=0, pin_factory=factory)
-LEFT_LPWM  = PWMOutputDevice(21, frequency=1000, initial_value=0, pin_factory=factory)
+LEFT_RPWM = PWMOutputDevice(20, frequency=1000, initial_value=0, pin_factory=factory)
+LEFT_LPWM = PWMOutputDevice(21, frequency=1000, initial_value=0, pin_factory=factory)
 
 
 def stop_drive():
@@ -241,141 +199,75 @@ def turn_left(speed: float = 0.5):
     RIGHT_RPWM.value, LEFT_LPWM.value = speed + 0.01, speed
     RIGHT_LPWM.value, LEFT_RPWM.value = 0.0, 0.0
 
-# ============================================================
-# ENCODER
-# ============================================================
-class YellowJacketEncoder:
-    """
-    goBILDA Yellow Jacket encoder
-    Spec used directly:
-        384.5 PPR at OUTPUT SHAFT
-        Quadrature decoding -> x4
-    """
 
-    # Quadrature transition table
-    _TRANS = {
-        0b0001: +1, 0b0010: -1,
-        0b0100: -1, 0b0111: +1,
-        0b1000: +1, 0b1011: -1,
-        0b1101: -1, 0b1110: +1,
-    }
+# ============================================================
+# ENCODER & STEPPER
+# ============================================================
+pi_enc = pigpio.pi()
+
+
+class YellowJacketEncoder:
+    _TRANS = {0b0001: +1, 0b0010: -1, 0b0100: -1, 0b0111: +1, 0b1000: +1, 0b1011: -1, 0b1101: -1, 0b1110: +1}
 
     def __init__(self, pi, gpio_a, gpio_b):
-        self.pi = pi
-        self.gpio_a = gpio_a
-        self.gpio_b = gpio_b
-
-        # ===== SITE SPEC (USED DIRECTLY) =====
+        self.pi, self.gpio_a, self.gpio_b = pi, gpio_a, gpio_b
         self.ppr_output = 384.5 * (100 / 106)
-        self.counts_per_rev_output = self.ppr_output  # 1538 counts/rev
-
+        self.counts_per_rev_output = self.ppr_output
         self.counts = 0
-        self._last_state = 0
-        self._t_last = time.time()
-        self._c_last = 0
-        self._output_rpm = 0.0
-
-        for g in (gpio_a, gpio_b):
-            self.pi.set_mode(g, pigpio.INPUT)
-            self.pi.set_pull_up_down(g, pigpio.PUD_UP)
-
-        a = self.pi.read(gpio_a)
-        b = self.pi.read(gpio_b)
-        self._last_state = (a << 1) | b
-
-        self._cba = self.pi.callback(gpio_a, pigpio.EITHER_EDGE, self._cb)
-        self._cbb = self.pi.callback(gpio_b, pigpio.EITHER_EDGE, self._cb)
+        self._last_state = (pi.read(gpio_a) << 1) | pi.read(gpio_b)
+        self.pi.set_mode(gpio_a, pigpio.INPUT)
+        self.pi.set_pull_up_down(gpio_a, pigpio.PUD_UP)
+        self.pi.set_mode(gpio_b, pigpio.INPUT)
+        self.pi.set_pull_up_down(gpio_b, pigpio.PUD_UP)
+        self._cba = pi.callback(gpio_a, pigpio.EITHER_EDGE, self._cb)
+        self._cbb = pi.callback(gpio_b, pigpio.EITHER_EDGE, self._cb)
+        self._t_last, self._c_last, self._output_rpm = time.time(), 0, 0.0
 
     def _cb(self, gpio, level, tick):
-        a = self.pi.read(self.gpio_a)
-        b = self.pi.read(self.gpio_b)
-        new_state = (a << 1) | b
-        key = (self._last_state << 2) | new_state
-        self.counts += self._TRANS.get(key, 0)
+        new_state = (self.pi.read(self.gpio_a) << 1) | self.pi.read(self.gpio_b)
+        self.counts += self._TRANS.get((self._last_state << 2) | new_state, 0)
         self._last_state = new_state
 
     def update(self, window_s=0.2):
-        t = time.time()
-        dt = t - self._t_last
-        if dt < window_s:
-            return
+        dt = time.time() - self._t_last
+        if dt < window_s: return
+        self._output_rpm = 60.0 * ((self.counts - self._c_last) / self.counts_per_rev_output) / dt
+        self._t_last, self._c_last = time.time(), self.counts
 
-        dc = self.counts - self._c_last
-        rps = (dc / self.counts_per_rev_output) / dt
-        self._output_rpm = 60.0 * rps
+    def output_revolutions(self): return self.counts / self.counts_per_rev_output
 
-        self._t_last = t
-        self._c_last = self.counts
-
-    # ===== Public API =====
-    def output_revolutions(self):
-        return self.counts / self.counts_per_rev_output
-
-    def output_rpm(self):
-        return self._output_rpm
-
-    def output_degrees(self):
-        return self.output_revolutions() * 360.0
-
-    def zero(self):
-        self.counts = 0
-        self._c_last = 0
-        self._t_last = time.time()
-        self._output_rpm = 0.0
-
-    def stop(self):
-        self._cba.cancel()
-        self._cbb.cancel()
+    def zero(self): self.counts = self._c_last = 0
 
 
-ENC_A = 24  # free
-ENC_B = 25  # free
-pi = pigpio.pi()
-enc = YellowJacketEncoder(pi, ENC_A, ENC_B)
+enc = YellowJacketEncoder(pi_enc, 24, 25)
 
 
-
-# ============================================================
-# STEPPER MOTOR
-# ============================================================
 class StepperMotor:
     def __init__(self, pins):
-        self.pins = pins
-        self.pi = pigpio.pi()
+        self.pins, self.pi = pins, pigpio.pi()
         self.seq = [
             [1, 0, 1, 0],
-            [0, 1, 1, 0],
+            [1, 0, 0, 1],
             [0, 1, 0, 1],
-            [0, 0, 1, 1],
+            [0, 1, 1, 0]
         ]
-        for p in self.pins:
-            self.pi.set_mode(p, pigpio.OUTPUT)
-            self.pi.write(p, 0)
+        for p in self.pins: self.pi.set_mode(p, pigpio.OUTPUT)
 
-    def step_chunk(self, steps: int, direction: int = 1, delay_sec: float = 0.002):
-        steps = int(max(0, steps))
+    def step_chunk(self, steps, direction=1, delay_sec=0.002):
         direction = 1 if direction >= 0 else -1
-
-        for _ in range(steps):
+        for _ in range(int(steps)):
             for step in range(4):
                 idx = step if direction == 1 else 3 - step
-                for i, p in enumerate(self.pins):
-                    self.pi.write(p, self.seq[idx][i])
+                for i, p in enumerate(self.pins): self.pi.write(p, self.seq[idx][i])
                 time.sleep(delay_sec)
-
-        # de-energize between chunks
         self.deenergize()
 
     def deenergize(self):
-        for p in self.pins:
-            self.pi.write(p, 0)
+        for p in self.pins: self.pi.write(p, 0)
 
     def close(self):
         self.deenergize()
-        try:
-            self.pi.stop()
-        except Exception:
-            pass
+        self.pi.stop()
 
 
 _stepper = StepperMotor([23, 22, 27, 17])
@@ -383,24 +275,16 @@ _stepper = StepperMotor([23, 22, 27, 17])
 
 def stepper_tick(direction: int):
     global _last_stepper_cmd_t
-    now = time.time()
-    if now - _last_stepper_cmd_t >= STEPPER_TICK_SEC:
-        _last_stepper_cmd_t = now
+    if time.time() - _last_stepper_cmd_t >= STEPPER_TICK_SEC:
+        _last_stepper_cmd_t = time.time()
         _stepper.step_chunk(STEPPER_CHUNK, direction=direction, delay_sec=STEPPER_STEP_DELAY_SEC)
 
 
-
 # ============================================================
-# VISION (Stereo + YOLO) as functions
+# VISION
 # ============================================================
-# Global cached vision state so pressing 'c' is fast
 _vision_ready = False
-_model = None
-_cap_l = None
-_cap_r = None
-_maps_l = None
-_maps_r = None
-_Q = None
+_model = _cap_l = _cap_r = _maps_l = _maps_r = _Q = None
 
 
 def open_cam(path: str, name: str):
@@ -493,6 +377,7 @@ def init_vision():
     _vision_ready = True
     print("[VISION] Ready.", flush=True)
 
+
 def read_latest_stereo(cap_l, cap_r, flush_n=10):
     """
     Flush old frames from both cameras and return the latest pair.
@@ -579,6 +464,9 @@ def detect_bottle_once():
     }
 
 
+# ============================================================
+# MOTION & AUTONOMY
+# ============================================================
 def drive_distance(d_cm, forward: bool):
     enc.zero()
     enc.update()
@@ -643,7 +531,7 @@ def bring_bottle():
                 break
             else:
                 print("Lost bottle :(")
-
+                drive_distance(found_bottle["Z"], True)
     drive_distance(found_bottle["Z"], True)
     print("Arrived at bottle location.")
     time.sleep(1)
@@ -653,31 +541,56 @@ def bring_bottle():
 
 
 def bring_bottle_xz():
-    time.sleep(2)
-    z0 = 22
-    t0 = time.perf_counter()
-    while True:
-        found_bottle = detect_bottle_once()
-        now = time.perf_counter()
-        if now - t0 > 10:
-            break
-        if found_bottle["found"]:
-            print(f"Bottle at X={found_bottle['X']:.2f}, Y={found_bottle['Y']:.2f}, Z={found_bottle['Z']:.2f}")
-            original_z = found_bottle['Z']
-            new_z = z0 + original_z
-            alpha = math.atan2(found_bottle['X'], new_z)
-            break
-        else:
-            print("No bottle detected.")
+    global _red_led_fail_until
+    print("[AUTO] Starting detection loop...")
 
-    turn_angle(alpha, alpha < 0)
-    print("Completed turn towards bottle.")
-    drive_distance(math.hypot(found_bottle["Z"], found_bottle["X"]), True)
-    print("Arrived at bottle location.")
-    time.sleep(1)
+    # ×•×™×“×•× ×¦×‘×ª ×¤×ª×•×—×” ×œ×¤× ×™ ×ª×—×™×œ×ª ×”×ª× ×•×¢×”
     servo_move_step(0)
     time.sleep(1)
-    drive_distance(math.hypot(found_bottle["Z"], found_bottle["X"]), False)
+
+    start_time = time.time()
+    found_bottle = {"found": False}
+
+    # ×œ×•×œ××ª × ×™×¡×™×•× ×•×ª ×–×™×”×•×™ ×œ×ž×©×š 5 ×©× ×™×•×ª ×œ×ž×–×¢×•×¨ ×©×’×™××•×ª ×’×™×œ×•×™ (BER) [cite: 13, 42]
+    while (time.time() - start_time) < 5.0:
+        found_bottle = detect_bottle_once()
+        if found_bottle["found"]:
+            break
+        time.sleep(0.1)
+
+    if found_bottle["found"]:
+        # ×”×¦×œ×—×”: ×”×“×œ×§×ª ×œ×“×™× ×™×¨×•×§×™×
+        GPIO.output(GREEN_LED_PIN, GPIO.LOW)
+        time.sleep(1)
+
+        # ×›×™×‘×•×™ ×œ×“×™× ×™×¨×•×§×™× ×¨×’×¢ ×œ×¤× ×™ ×ª×—×™×œ×ª ×”× ×¡×™×¢×”
+        GPIO.output(GREEN_LED_PIN, GPIO.HIGH)
+
+        # ×¨×¦×£ ×ª× ×•×¢×” ×•×ª×¤×™×¡×”
+        alpha = math.atan2(found_bottle['X'], 22 + found_bottle['Z'])
+        turn_angle(alpha, alpha < 0)
+        drive_distance(math.hypot(found_bottle["Z"], found_bottle["X"]), True)
+
+        time.sleep(1)
+        servo_move_step(1)  # ×¡×’×™×¨×”
+        time.sleep(1)
+
+        # ×”×¨×ž×ª ×–×¨×•×¢ 30 ×ž×¢×œ×•×ª (170 ×¦×¢×“×™×)
+        _stepper.step_chunk(170, direction=1, delay_sec=STEPPER_STEP_DELAY_SEC)
+        time.sleep(0.5)
+
+        drive_distance(math.hypot(found_bottle["Z"], found_bottle["X"]), False)
+
+        # ×”×•×¨×“×ª ×–×¨×•×¢ ×—×–×¨×”
+        _stepper.step_chunk(170, direction=-1, delay_sec=STEPPER_STEP_DELAY_SEC)
+        time.sleep(0.5)
+
+        servo_move_step(0)  # ×©×—×¨×•×¨
+        time.sleep(1)
+    else:
+        # ×›×©×œ: ×”×’×“×¨×ª ×˜×™×™×ž×¨ ×œ×œ×“×™× ××“×•×ž×™× ×œ×ž×©×š 5 ×©× ×™×•×ª
+        print("[AUTO] Timeout: Bottle not found.")
+        _red_led_fail_until = time.time() + 5.0
 
 
 def shutdown_vision():
@@ -692,69 +605,83 @@ def shutdown_vision():
 
 
 # ============================================================
-# PAYLOAD HANDLER (MATCHES YOUR ESP32 PACKET ENCODING)
-#   dataByte = (flexBits<<4) | (rollBits<<2) | pitchBits
-#
-#   flexPins order on ESP32: {A0, A2, A1, A3}
-#   so:
-#     f0 -> bit0 -> A0
-#     f1 -> bit1 -> A2
-#     f2 -> bit2 -> A1
-#     f3 -> bit3 -> A3
+# MAIN LOOP
 # ============================================================
+def run_glove_loop():
+    global _stepper_dir, _last_pkt_t, sock, last_rx, _red_led_fail_until
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.bind((UDP_LISTEN_IP, UDP_PORT))
+    sock.settimeout(0.02)
+    last_rx = _last_pkt_t = time.time()
+    print(f"debug: Listening for UDP packets on {UDP_LISTEN_IP}:{UDP_PORT}...")
+    while True:
+        ultrasonic_tick()
+
+        now = time.time()
+        too_close = obstacle_too_close()
+        # ×—×™×•×•×™ ××“×•× ×× ×™×© ×ž×›×©×•×œ ××• ×× ×™×© ×›×©×œ ×–×™×”×•×™ ×‘×˜×™×™×ž×¨
+        fail_active = (now < _red_led_fail_until)
+
+        if too_close or fail_active:
+            GPIO.output(RED_LED_PIN, GPIO.LOW)  # ×“×•×œ×§ (PNP)
+        else:
+            GPIO.output(RED_LED_PIN, GPIO.HIGH)  # ×›×‘×•×™
+
+        if now - _last_pkt_t > STEP_CMD_STALE_SEC:
+            if _stepper_dir != 0: _stepper_dir = 0; _stepper.deenergize()
+
+        if _stepper_dir != 0: stepper_tick(_stepper_dir)
+
+        try:
+            data, _ = sock.recvfrom(1024)
+            if len(data) >= 3 and data[0] == FRAME_START and data[2] == FRAME_END:
+                handle_payload(data[1])
+                last_rx = time.time()
+        except socket.timeout:
+            if time.time() - last_rx > SILENCE_STOP_SEC: stop_drive()
+
+        time.sleep(CONTROL_PERIOD_SEC)
+
+
+
 def handle_payload(payload: int):
-    global prev_f0, prev_f1, prev_f2, prev_f3
-    global _stepper_dir, _last_pkt_t
+    global prev_f0, prev_f1, prev_f2, prev_f3, _stepper_dir, _last_pkt_t
     global _prev_drive_req, _prev_prev_drive_req, _ignore_ultra_active, _ignore_ultra_cmd
 
-    _last_pkt_t = time.time()  # refresh stepper-command validity on every valid packet
+    _last_pkt_t = time.time()
 
     flex = (payload >> 4) & 0x0F
-    roll_code = (payload >> 2) & 0x03
-    pitch_code = payload & 0x03
-
     f0 = (flex >> 0) & 1
     f1 = (flex >> 1) & 1
     f2 = (flex >> 2) & 1
     f3 = (flex >> 3) & 1
 
-    # ------------------------------------------------------------
-    # Special combo: all fingers pressed -> bring bottle
-    # ------------------------------------------------------------
-    if (f0 == 1 and f1 == 1 and f2 == 1 and f3 == 1) and not (prev_f0 == 1 and prev_f1 == 1 and prev_f2 == 1 and prev_f3 == 1):
+    # ---- autonomy trigger (keep your existing behavior) ----
+    if (f0 == 1 and f1 == 1 and f2 == 1 and f3 == 1) and not (
+            prev_f0 == 1 and prev_f1 == 1 and prev_f2 == 1 and prev_f3 == 1):
         bring_bottle_xz()
-        prev_f0, prev_f1, prev_f2, prev_f3 = f0, f1, f2, f3
-        return
 
-    # ------------------------------------------------------------
-    # Servo edge detection (now: f3=close, f2=open)
-    # ------------------------------------------------------------
+    # ---- servo edge detection ----
     if f3 == 1 and prev_f3 == 0:
-        print("[EVENT] Finger 3 (A3) pressed -> Closing Servo")
-        servo_move_step(1)
-
+        servo_move_step(1)  # close
     if f2 == 1 and prev_f2 == 0:
-        print("[EVENT] Finger 2 (A1) pressed -> Opening Servo")
-        servo_move_step(0)
+        servo_move_step(0)  # open
 
-    # ------------------------------------------------------------
-    # Stepper "held" command (now: f0=down, f1=up)
-    #   Movement happens in main loop based on _stepper_dir
-    # ------------------------------------------------------------
+    # ---- stepper held command ----
     if f0 == 1 and f1 == 0:
-        _stepper_dir = -1   # down
+        _stepper_dir = -1
     elif f1 == 1 and f0 == 0:
-        _stepper_dir = +1   # up
+        _stepper_dir = +1
     else:
         _stepper_dir = 0
 
-    # update previous states for edge detection
+    # ---- update finger history for edge detection ----
     prev_f0, prev_f1, prev_f2, prev_f3 = f0, f1, f2, f3
 
-    # ------------------------------------------------------------
-    # Decide requested DRIVE command from roll/pitch
-    #   (independent of ultrasonic gating)
-    # ------------------------------------------------------------
+    # ---- decode drive request ----
+    pitch_code = payload & 0x03
+    roll_code = (payload >> 2) & 0x03
+
     if pitch_code == 0b01:
         drive_req = "REV"
     elif pitch_code == 0b10:
@@ -766,35 +693,34 @@ def handle_payload(payload: int):
     else:
         drive_req = "STOP"
 
+    print(f"Received drive request: {drive_req} (payload: {payload:08b})")
+
     too_close = obstacle_too_close()
 
-     # ------------------------------------------------------------
+    # ------------------------------------------------------------
     # Ignore-ultrasonic MODE logic:
     # Arm when we see: X, STOP, X   (X in {FWD, LEFT, RIGHT})
     # Keep active only while holding the same X.
-    # Disable when STOP (zeros) or REV (backwards) or direction change.
+    # Disable when STOP or REV or direction change.
     # ------------------------------------------------------------
     allowed_dir = {"FWD", "LEFT", "RIGHT"}
 
-    # Disable ignore-mode if user stops, reverses, or changes direction
+    # disable ignore mode if STOP/REV/changed dir
     if _ignore_ultra_active:
         if drive_req in ("STOP", "REV") or drive_req != _ignore_ultra_cmd:
             _ignore_ultra_active = False
             _ignore_ultra_cmd = None
 
-    # Arm ignore-mode on pattern: (two steps ago == current) and (previous == STOP)
+    # arm ignore mode on pattern X,STOP,X
     if (not _ignore_ultra_active) and (drive_req in allowed_dir):
         if _prev_drive_req == "STOP" and _prev_prev_drive_req == drive_req:
             _ignore_ultra_active = True
             _ignore_ultra_cmd = drive_req
             print(f"[MODE] Ignoring ultrasonics while holding {drive_req}")
 
-    # While mode is active AND we keep holding the same X, ignore ultrasonic stop
     ignore_ultra_now = (_ignore_ultra_active and drive_req == _ignore_ultra_cmd)
 
-    # ------------------------------------------------------------
-    # Apply DC motors (reverse always allowed)
-    # ------------------------------------------------------------
+    # ---- apply drive (reverse always allowed) ----
     if drive_req == "REV":
         drive_reverse()
 
@@ -819,95 +745,20 @@ def handle_payload(payload: int):
     else:
         stop_drive()
 
-    # ------------------------------------------------------------
-    # Update history of REQUESTED drive commands (not what actually happened)
-    # ------------------------------------------------------------
+    # ---- update drive history (requested commands) ----
     _prev_prev_drive_req = _prev_drive_req
     _prev_drive_req = drive_req
 
 
-# ============================================================
-# MAIN LOOP
-# ============================================================
-def run_glove_loop():
-    global _stepper_dir, _last_pkt_t, sock, last_rx
-
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.bind((UDP_LISTEN_IP, UDP_PORT))
-    sock.settimeout(0.02)  # faster silence detection
-
-    print(f"[RUNNING] Glove UDP + Async Ultrasonic on Port {UDP_PORT}")
-
-    last_rx = time.time()
-    _last_pkt_t = time.time()  # initialize to "now" so we don't instantly stale-stop on startup
-
-    while True:
-        ultrasonic_tick()
-
-        # ----- Stepper freshness gate: if packets stop, stop stepper immediately -----
-        now = time.time()
-        if now - _last_pkt_t > STEP_CMD_STALE_SEC:
-            if _stepper_dir != 0:
-                _stepper_dir = 0
-                _stepper.deenergize()  # immediate stop (drop coils)
-
-        # ----- Stepper continuous motion only while command is fresh -----
-        if _stepper_dir != 0:
-            stepper_tick(_stepper_dir)
-
-        # ----- UDP receive -----
-        try:
-            data, _ = sock.recvfrom(1024)
-            if len(data) >= 3 and data[0] == FRAME_START and data[2] == FRAME_END:
-                handle_payload(data[1])
-                last_rx = time.time()
-        except socket.timeout:
-            # Stop DC motors on long silence
-            if time.time() - last_rx > SILENCE_STOP_SEC:
-                stop_drive()
-
-        time.sleep(CONTROL_PERIOD_SEC)
-
-
-# ============================================================
-# PIN MAPPING (Raspberry Pi, BCM numbering)
-#
-#   Usage                  BCM   Physical pin
-#   ------------------------------------------------
-#   Ultrasonic #1 TRIG      5    pin 29
-#   Ultrasonic #1 ECHO      6    pin 31
-#   Ultrasonic #2 TRIG     13    pin 33
-#   Ultrasonic #2 ECHO     19    pin 35
-#
-#   Servo signal           12    pin 32
-#
-#   Right DC motor RPWM     2    pin 3
-#   Right DC motor LPWM     3    pin 5
-#   Left  DC motor RPWM    20    pin 38
-#   Left  DC motor LPWM    21    pin 40
-#
-#   Stepper IN1            23    pin 16
-#   Stepper IN2            22    pin 15
-#   Stepper IN3            27    pin 13
-#   Stepper IN4            17    pin 11
-# ============================================================
-
-
-# ============================================================
-# ENTRY
-# ============================================================
 if __name__ == "__main__":
     try:
-        init_vision()
+        init_vision();
         run_glove_loop()
     except KeyboardInterrupt:
         pass
     finally:
         stop_drive()
-        shutdown_vision()
-        try:
-            _stepper.close()
-        except Exception:
-            pass
-        GPIO.cleanup()
-        print("\n[OFF] System Stopped.", flush=True)
+        GPIO.output(RED_LED_PIN, GPIO.HIGH);
+        GPIO.output(GREEN_LED_PIN, GPIO.HIGH)
+        GPIO.cleanup();
+        print("\n[OFF] System Stopped.")
