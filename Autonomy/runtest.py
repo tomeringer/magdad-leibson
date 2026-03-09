@@ -233,7 +233,7 @@ def init_vision():
         return
 
     print("[VISION] Initializing YOLO + stereo...", flush=True)
-    _model = YOLO('Autonomy/yolov8n_ncnn_model', task='detect')
+    _model = YOLO('yolov8n_ncnn_model', task='detect')
 
     _cap_l = open_cam(LEFT_CAM, "LEFT")
     _cap_r = open_cam(RIGHT_CAM, "RIGHT")
