@@ -243,11 +243,11 @@ void loop() {
     uint8_t dataByte = (flexBits << 4) | (rollBits << 2) | pitchBits;
 
     // הדפסת המידע המשודר
-    // Serial.print(" | IMU: ");
-    // Serial.print(relRoll, 1); Serial.print("/"); Serial.print(relPitch, 1);
-    // Serial.print(" | Packet: ");
-    // Serial.printf(BYTE_TO_BINARY_PATTERN, BYTE_TO_BINARY(dataByte));
-    // Serial.println();
+    Serial.print(" | IMU: ");
+    Serial.print(relRoll, 1); Serial.print("/"); Serial.print(relPitch, 1);
+    Serial.print(" | Packet: ");
+    Serial.printf(BYTE_TO_BINARY_PATTERN, BYTE_TO_BINARY(dataByte));
+    Serial.println();
 
     bool isZeroPacket = (dataByte == 0x00);
 
