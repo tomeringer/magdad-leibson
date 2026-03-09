@@ -422,11 +422,12 @@ def bring_bottle_xz():
             new_z = z0 + original_z
             alpha = math.atan2(found_bottle['X'], new_z)
             break
-        else:
+        else:   
             print("No bottle detected.")
 
     turn_angle(alpha, alpha < 0)
     print("Completed turn towards bottle.")
+    wait_time = 0.5
     drive_distance(math.hypot(found_bottle["Z"], found_bottle["X"]), True)
     print("Arrived at bottle location.")
     time.sleep(1)
