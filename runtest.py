@@ -305,9 +305,7 @@ def detect_bottle_once():
         "cx": cx, "cy": cy,
         "disparity": disparity,
         "conf": conf,
-        "t_proc": t_proc,
-        "frame_l": frame_l,  # <-- הוספנו את הפריים השמאלי
-        "frame_r": frame_r   # <-- הוספנו את הפריים הימני
+        "t_proc": t_proc
     }
 
 def shutdown_vision():
@@ -406,7 +404,7 @@ def bring_bottle_xz():
         GPIO.output(RED_LED_PIN, GPIO.HIGH)
 
 
-def track_bottle_continuous_without_cam():
+def track_bottle_continuous():
     # Run continuous detection loop. Press Ctrl+C to exit this loop.
     print("\n[VISION] Starting continuous tracking. Press Ctrl+C to return to menu.")
     try:
@@ -421,56 +419,6 @@ def track_bottle_continuous_without_cam():
             time.sleep(0.1)
     except KeyboardInterrupt:
         print("\n[VISION] Tracking stopped. Returning to menu.")
-
-
-def track_bottle_continuous():
-    print("\n[VISION] Starting continuous tracking.")
-    print("Press 'q' in the video window OR Ctrl+C in terminal to return to menu.")
-    
-    # Create a named window so we can control it
-    cv2.namedWindow("Stereo Vision", cv2.WINDOW_AUTOSIZE)
-    
-    try:
-        while True:
-            bottle = detect_bottle_once()
-            
-            # Extract the frames from the dictionary
-            frame_l = bottle.get("frame_l")
-            frame_r = bottle.get("frame_r")
-            
-            if bottle["found"]:
-                print(f"Bottle Location -> X: {bottle['X']:.2f}, Y: {bottle['Y']:.2f}, Z: {bottle['Z']:.2f}")
-                
-                # Draw a green circle and the coordinates on the left frame
-                if frame_l is not None:
-                    cx, cy = bottle["cx"], bottle["cy"]
-                    cv2.circle(frame_l, (cx, cy), 10, (0, 255, 0), -1)
-                    cv2.putText(frame_l, f"X:{bottle['X']:.1f} Z:{bottle['Z']:.1f}", 
-                                (cx - 40, cy - 20), 
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-            else:
-                print("Bottle not found...")
-                
-            # If we successfully got frames, display them
-            if frame_l is not None and frame_r is not None:
-                # Put the left and right cameras side-by-side
-                combined_view = np.hstack((frame_l, frame_r))
-                cv2.imshow("Stereo Vision", combined_view)
-            
-            # Wait 1ms to refresh the GUI. If 'q' is pressed, break the loop.
-            key = cv2.waitKey(1) & 0xFF
-            if key == ord('q'):
-                print("\n[VISION] 'q' pressed. Exiting tracking.")
-                break
-                
-            time.sleep(0.05)  # Small delay to keep the terminal readable
-            
-    except KeyboardInterrupt:
-        print("\n[VISION] Tracking stopped via Ctrl+C.")
-    finally:
-        # Safely close the OpenCV window when exiting the function
-        cv2.destroyWindow("Stereo Vision")
-
 
 # ============================================================
 # MAIN EXECUTION
