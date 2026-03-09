@@ -427,7 +427,7 @@ def bring_bottle_xz():
 
     turn_angle(alpha, alpha < 0)
     print("Completed turn towards bottle.")
-    wait_time = 0.5
+    wait_time = 2
     drive_distance(math.hypot(found_bottle["Z"], found_bottle["X"]), True)
     print("Arrived at bottle location.")
     time.sleep(1)
