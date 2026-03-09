@@ -2,20 +2,16 @@
 # -*- coding: utf-8 -*-
 
 import os
-
 os.environ['PIGPIO_ADDR'] = 'localhost'
 
 import time
-import socket
 import pigpio
 import RPi.GPIO as GPIO
-from typing import Optional
 from gpiozero import PWMOutputDevice, Servo
 from gpiozero.pins.pigpio import PiGPIOFactory
 
 import math
 import pickle
-
 import cv2
 import numpy as np
 from ultralytics import YOLO
@@ -23,19 +19,8 @@ from ultralytics import YOLO
 # ============================================================
 # CONFIGURATION
 # ============================================================
-MODE = "GLOVE"
-UDP_LISTEN_IP = "0.0.0.0"
-UDP_PORT = 4210
-FRAME_START = 0xAA
-FRAME_END = 0x55
-
-CONTROL_PERIOD_SEC = 0.01
-SILENCE_STOP_SEC = 0.7
-
-# --- הגדרות LED (PNP BC327) ---
-RED_LED_PIN = 26  # אדומים - מכשול (אולטרסוני) + חיווי כשל
-GREEN_LED_PIN = 16  # ירוקים - זיהוי חפץ (עיבוד תמונה)
-# ------------------------------
+RED_LED_PIN = 26
+GREEN_LED_PIN = 16
 
 factory = PiGPIOFactory()
 
@@ -53,89 +38,12 @@ BOTTLE_CLASS_ID = 39
 YOLO_CONF = 0.50
 MATCH_Y_TOL = 10
 
-# ---- Stepper config ----
-STEPPER_CHUNK = 4
 STEPPER_STEP_DELAY_SEC = 0.0015
-STEPPER_TICK_SEC = 0.05
-_last_stepper_cmd_t = 0.0
-STEP_CMD_STALE_SEC = 0.12
-_stepper_dir = 0
-_last_pkt_t = 0.0
-sock = None
-last_rx = 0.0
-
-# ============================================================
-# GLOBAL STATE
-# ============================================================
-prev_f0 = prev_f1 = prev_f2 = prev_f3 = 0
-_prev_drive_req = "STOP"
-_prev_prev_drive_req = "STOP"
-_ignore_ultra_active = False
-_ignore_ultra_cmd = None
-
-# טיימר עבור חיווי האדום במקרה של כשל בזיהוי
-_red_led_fail_until = 0.0
-
-# ============================================================
-# ULTRASONIC SENSORS & GPIO SETUP
-# ============================================================
-US1_TRIG, US1_ECHO = 5, 6
-US2_TRIG, US2_ECHO = 13, 19
 
 GPIO.setmode(GPIO.BCM)
 GPIO.setwarnings(False)
-
-GPIO.setup(US1_TRIG, GPIO.OUT)
-GPIO.setup(US1_ECHO, GPIO.IN)
-GPIO.setup(US2_TRIG, GPIO.OUT)
-GPIO.setup(US2_ECHO, GPIO.IN)
-
-# אתחול לדים (PNP: HIGH = OFF)
 GPIO.setup(RED_LED_PIN, GPIO.OUT, initial=GPIO.HIGH)
 GPIO.setup(GREEN_LED_PIN, GPIO.OUT, initial=GPIO.HIGH)
-
-GPIO.output(US1_TRIG, GPIO.LOW)
-GPIO.output(US2_TRIG, GPIO.LOW)
-
-ULTRA_STOP_CM = 40.0
-US_TIMEOUT_SEC = 0.03
-ULTRA_MEASURE_PERIOD_SEC = 0.10
-
-_last_ultra_t = 0.0
-_last_distances = [None, None]
-
-
-def _measure_distance_cm(trig, echo) -> Optional[float]:
-    GPIO.output(trig, True)
-    time.sleep(0.00001)
-    GPIO.output(trig, False)
-    t0 = time.time()
-    while GPIO.input(echo) == 0:
-        if time.time() - t0 > US_TIMEOUT_SEC: return None
-    ps = time.time()
-    while GPIO.input(echo) == 1:
-        if time.time() - ps > US_TIMEOUT_SEC: return None
-    pe = time.time()
-    return (pe - ps) * 17150.0
-
-
-def ultrasonic_tick():
-    global _last_ultra_t, _last_distances
-    now = time.time()
-    if now - _last_ultra_t >= ULTRA_MEASURE_PERIOD_SEC:
-        _last_ultra_t = now
-        _last_distances = [
-            _measure_distance_cm(US1_TRIG, US1_ECHO),
-            _measure_distance_cm(US2_TRIG, US2_ECHO),
-        ]
-
-
-def obstacle_too_close() -> bool:
-    for d in _last_distances:
-        if d is not None and d < ULTRA_STOP_CM:
-            return True
-    return False
-
 
 # ============================================================
 # SERVO & MOTORS
@@ -153,7 +61,6 @@ MOVE_STEP = 0.39
 current_pos = 0.0
 servo_is_open = True
 
-
 def servo_move_step(direction):
     global current_pos, servo_is_open
     want_close = (direction == 1)
@@ -170,43 +77,34 @@ def servo_move_step(direction):
     servo.value = current_pos
     servo_is_open = (not want_close)
 
-
 RIGHT_RPWM = PWMOutputDevice(2, frequency=1000, initial_value=0, pin_factory=factory)
 RIGHT_LPWM = PWMOutputDevice(3, frequency=1000, initial_value=0, pin_factory=factory)
 LEFT_RPWM = PWMOutputDevice(20, frequency=1000, initial_value=0, pin_factory=factory)
 LEFT_LPWM = PWMOutputDevice(21, frequency=1000, initial_value=0, pin_factory=factory)
 
-
 def stop_drive():
     RIGHT_RPWM.value = RIGHT_LPWM.value = LEFT_RPWM.value = LEFT_LPWM.value = 0.0
-
 
 def drive_forward(speed: float = 0.5):
     RIGHT_RPWM.value, LEFT_RPWM.value = speed + 0.01, speed
     RIGHT_LPWM.value, LEFT_LPWM.value = 0.0, 0.0
 
-
 def drive_reverse():
     RIGHT_LPWM.value, LEFT_LPWM.value = 0.51, 0.50
     RIGHT_RPWM.value, LEFT_RPWM.value = 0.0, 0.0
-
 
 def turn_right(speed: float = 0.5):
     RIGHT_LPWM.value, LEFT_RPWM.value = speed + 0.01, speed
     RIGHT_RPWM.value, LEFT_LPWM.value = 0.0, 0.0
 
-
 def turn_left(speed: float = 0.5):
     RIGHT_RPWM.value, LEFT_LPWM.value = speed + 0.01, speed
     RIGHT_LPWM.value, LEFT_RPWM.value = 0.0, 0.0
-
-
 
 # ============================================================
 # ENCODER & STEPPER
 # ============================================================
 pi_enc = pigpio.pi()
-
 
 class YellowJacketEncoder:
     _TRANS = {0b0001: +1, 0b0010: -1, 0b0100: -1, 0b0111: +1, 0b1000: +1, 0b1011: -1, 0b1101: -1, 0b1110: +1}
@@ -240,9 +138,7 @@ class YellowJacketEncoder:
 
     def zero(self): self.counts = self._c_last = 0
 
-
 enc = YellowJacketEncoder(pi_enc, 24, 25)
-
 
 class StepperMotor:
     def __init__(self, pins):
@@ -265,23 +161,13 @@ class StepperMotor:
     def close(self):
         self.deenergize(); self.pi.stop()
 
-
 _stepper = StepperMotor([23, 22, 27, 17])
-
-
-def stepper_tick(direction: int):
-    global _last_stepper_cmd_t
-    if time.time() - _last_stepper_cmd_t >= STEPPER_TICK_SEC:
-        _last_stepper_cmd_t = time.time()
-        _stepper.step_chunk(STEPPER_CHUNK, direction=direction, delay_sec=STEPPER_STEP_DELAY_SEC)
-
 
 # ============================================================
 # VISION
 # ============================================================
 _vision_ready = False
 _model = _cap_l = _cap_r = _maps_l = _maps_r = _Q = None
-
 
 def open_cam(path: str, name: str):
     cap = cv2.VideoCapture(path, cv2.CAP_V4L2)
@@ -295,7 +181,6 @@ def open_cam(path: str, name: str):
     cap.set(cv2.CAP_PROP_FPS, CAM_FPS)
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 2)
 
-    # Warm up
     for _ in range(10):
         cap.read()
 
@@ -303,7 +188,6 @@ def open_cam(path: str, name: str):
           f"{cap.get(cv2.CAP_PROP_FRAME_WIDTH):.0f}x{cap.get(cv2.CAP_PROP_FRAME_HEIGHT):.0f} "
           f"@ {cap.get(cv2.CAP_PROP_FPS):.1f}fps", flush=True)
     return cap
-
 
 def load_and_prepare_calibration(file_path):
     try:
@@ -317,7 +201,6 @@ def load_and_prepare_calibration(file_path):
         R = data['R']
         T = data['T']
         Q = data['Q']
-
     except Exception as e:
         raise RuntimeError(f"Calibration load failed: {e}")
 
@@ -333,7 +216,6 @@ def load_and_prepare_calibration(file_path):
     map1_r, map2_r = cv2.initUndistortRectifyMap(K2, D2, R2, P2, img_size, cv2.CV_32FC1)
     return (map1_l, map2_l), (map1_r, map2_r), Q
 
-
 def calculate_3d_coords(disparity, x, y, Q_matrix):
     point = np.array([x, y, disparity, 1], dtype=np.float32)
     hp = np.dot(Q_matrix, point)
@@ -345,20 +227,12 @@ def calculate_3d_coords(disparity, x, y, Q_matrix):
     Z = hp[2] / w
     return (X, Y, Z)
 
-
 def init_vision():
-    """
-    Call once at startup (or lazy-init on first 'c').
-    """
     global _vision_ready, _model, _cap_l, _cap_r, _maps_l, _maps_r, _Q
-
     if _vision_ready:
         return
 
     print("[VISION] Initializing YOLO + stereo...", flush=True)
-
-    # Load YOLO (adjust to your actual model path)
-    # _model = YOLO('yolov8n.pt')
     _model = YOLO('Autonomy/yolov8n_ncnn_model', task='detect')
 
     _cap_l = open_cam(LEFT_CAM, "LEFT")
@@ -367,55 +241,32 @@ def init_vision():
         raise RuntimeError("One or both cameras failed to open.")
 
     _maps_l, _maps_r, _Q = (*load_and_prepare_calibration(CALIBRATION_FILE_PATH),)
-    # load_and_prepare_calibration returns (maps_l, maps_r, Q)
-    # The line above packs it into _maps_l, _maps_r, _Q
-
     _vision_ready = True
     print("[VISION] Ready.", flush=True)
 
-
 def read_latest_stereo(cap_l, cap_r, flush_n=10):
-    """
-    Flush old frames from both cameras and return the latest pair.
-    """
     for _ in range(flush_n):
         cap_l.grab()
         cap_r.grab()
-
     ret_l, frame_l = cap_l.retrieve()
     ret_r, frame_r = cap_r.retrieve()
-
     return ret_l, frame_l, ret_r, frame_r
 
-
 def detect_bottle_once():
-    """
-    Grabs one stereo pair and tries to compute bottle (X,Y,Z) and pixel center.
-    Returns dict with keys: found, X,Y,Z,cx,cy,disparity,conf,t_proc
-    """
     global _model, _cap_l, _cap_r, _maps_l, _maps_r, _Q
-
     t0 = time.perf_counter()
-
-    ret_l, frame_l_orig, ret_r, frame_r_orig = read_latest_stereo(
-        _cap_l, _cap_r, flush_n=5
-    )
+    ret_l, frame_l_orig, ret_r, frame_r_orig = read_latest_stereo(_cap_l, _cap_r, flush_n=5)
 
     if not ret_l or not ret_r:
         return {"found": False, "err": "Failed to read frames", "t_proc": time.perf_counter() - t0}
 
-    # Rectify
     frame_l = cv2.remap(frame_l_orig, _maps_l[0], _maps_l[1], cv2.INTER_LINEAR)
     frame_r = cv2.remap(frame_r_orig, _maps_r[0], _maps_r[1], cv2.INTER_LINEAR)
 
-    # YOLO on both frames
     results_l = _model.predict(frame_l, conf=YOLO_CONF, classes=[BOTTLE_CLASS_ID], verbose=False)
     results_r = _model.predict(frame_r, conf=YOLO_CONF, classes=[BOTTLE_CLASS_ID], verbose=False)
 
-    X = Y = Z = None
-    cx = cy = None
-    disparity = None
-    conf = None
+    X = Y = Z = cx = cy = disparity = conf = None
 
     if results_l and len(results_l[0].boxes) > 0:
         box_l = results_l[0].boxes[0]
@@ -437,10 +288,8 @@ def detect_bottle_once():
             disparity = abs(cx - x_r)
 
             if disparity and disparity > 0:
-                # Standard: calculate_3d_coords returns X,Y,Z in the units implied by calibration T
                 R = 0
                 X, Y, R = calculate_3d_coords(disparity, cx, cy, _Q)
-                # Z =  math.sqrt(R**2 - X**2 - Y**2)
                 Z = R
 
                 alpha = math.atan2(X, Z)
@@ -459,6 +308,14 @@ def detect_bottle_once():
         "t_proc": t_proc
     }
 
+def shutdown_vision():
+    global _cap_l, _cap_r
+    try:
+        if _cap_l is not None: _cap_l.release()
+        if _cap_r is not None: _cap_r.release()
+    except Exception:
+        pass
+
 # ============================================================
 # MOTION & AUTONOMY
 # ============================================================
@@ -475,7 +332,6 @@ def drive_distance(d_cm, forward: bool):
         time.sleep(0.01)
         enc.update()
     stop_drive()
-
 
 def turn_angle(theta_rad, left_turn: bool):
     theta_rad = theta_rad - math.radians(5)
@@ -494,59 +350,17 @@ def turn_angle(theta_rad, left_turn: bool):
         enc.update()
     stop_drive()
 
-
-def bring_bottle():
-    time.sleep(3)
-    t0 = time.perf_counter()
-    while True:
-        now = time.perf_counter()
-        if now - t0 > 10:
-            break
-        found_bottle = detect_bottle_once()
-        if found_bottle["found"]:
-            print(f"Bottle at X={found_bottle['X']:.2f}, Y={found_bottle['Y']:.2f}, Z={found_bottle['Z']:.2f}")
-            original_z = found_bottle['Z']
-            break
-        else:
-            print("No bottle detected.")
-
-    if found_bottle["Z"] > 80:
-        drive_distance(found_bottle["Z"] - 35, True)
-        print("Approached bottle.")
-
-        time.sleep(2)
-        t0 = time.perf_counter()
-        while True:
-            found_bottle = detect_bottle_once()
-            now = time.perf_counter()
-            if now - t0 > 10:
-                break
-            if found_bottle["found"]:
-                print(f"Bottle at X={found_bottle['X']:.2f}, Y={found_bottle['Y']:.2f}, Z={found_bottle['Z']:.2f}")
-                break
-            else:
-                print("Lost bottle :(")
-                drive_distance(found_bottle["Z"], True)
-    drive_distance(found_bottle["Z"], True)
-    print("Arrived at bottle location.")
-    time.sleep(1)
-    servo_move_step(0)
-    time.sleep(1)
-    drive_distance(original_z, False)
-
-
 def bring_bottle_xz():
-    global _red_led_fail_until
     print("[AUTO] Starting detection loop...")
 
-    # וידוא צבת פתוחה לפני תחילת התנועה
+    # Ensure gripper is open before starting movement
     servo_move_step(0)
     time.sleep(1)
 
     start_time = time.time()
     found_bottle = {"found": False}
 
-    # לולאת ניסיונות זיהוי למשך 5 שניות למזעור שגיאות גילוי (BER) [cite: 13, 42]
+    # Detection loop for 5 seconds to minimize detection errors (BER)
     while (time.time() - start_time) < 5.0:
         found_bottle = detect_bottle_once()
         if found_bottle["found"]:
@@ -554,205 +368,83 @@ def bring_bottle_xz():
         time.sleep(0.1)
 
     if found_bottle["found"]:
-        # הצלחה: הדלקת לדים ירוקים
+        # Success: Turn on green LEDs
         GPIO.output(GREEN_LED_PIN, GPIO.LOW)
         time.sleep(1)
 
-        # כיבוי לדים ירוקים רגע לפני תחילת הנסיעה
+        # Turn off green LEDs right before driving
         GPIO.output(GREEN_LED_PIN, GPIO.HIGH)
 
-        # רצף תנועה ותפיסה
+        # Movement and grasping sequence
         alpha = math.atan2(found_bottle['X'], 22 + found_bottle['Z'])
         turn_angle(alpha, alpha < 0)
         drive_distance(math.hypot(found_bottle["Z"], found_bottle["X"]), True)
 
         time.sleep(1)
-        servo_move_step(1)  # סגירה
+        servo_move_step(1)  # Close gripper
         time.sleep(1)
 
-        # הרמת זרוע 30 מעלות (170 צעדים)
+        # Raise arm 30 degrees (170 steps)
         _stepper.step_chunk(170, direction=1, delay_sec=STEPPER_STEP_DELAY_SEC)
         time.sleep(0.5)
 
         drive_distance(math.hypot(found_bottle["Z"], found_bottle["X"]), False)
 
-        # הורדת זרוע חזרה
+        # Lower arm back down
         _stepper.step_chunk(170, direction=-1, delay_sec=STEPPER_STEP_DELAY_SEC)
         time.sleep(0.5)
 
-        servo_move_step(0)  # שחרור
+        servo_move_step(0)  # Release gripper
         time.sleep(1)
     else:
-        # כשל: הגדרת טיימר ללדים אדומים למשך 5 שניות
+        # Failure: Turn on red LED for 5 seconds directly
         print("[AUTO] Timeout: Bottle not found.")
-        _red_led_fail_until = time.time() + 5.0
+        GPIO.output(RED_LED_PIN, GPIO.LOW)
+        time.sleep(5.0)
+        GPIO.output(RED_LED_PIN, GPIO.HIGH)
 
 
-def shutdown_vision():
-    global _cap_l, _cap_r
+def track_bottle_continuous():
+    # Run continuous detection loop. Press Ctrl+C to exit this loop.
+    print("\n[VISION] Starting continuous tracking. Press Ctrl+C to return to menu.")
     try:
-        if _cap_l is not None:
-            _cap_l.release()
-        if _cap_r is not None:
-            _cap_r.release()
-    except Exception:
-        pass
-    
+        while True:
+            bottle = detect_bottle_once()
+            if bottle["found"]:
+                print(f"Bottle Location -> X: {bottle['X']:.2f}, Y: {bottle['Y']:.2f}, Z: {bottle['Z']:.2f}")
+            else:
+                print("Bottle not found...")
+            
+            # Small delay to stabilize loop and reduce console spam
+            time.sleep(0.1)
+    except KeyboardInterrupt:
+        print("\n[VISION] Tracking stopped. Returning to menu.")
+
 # ============================================================
-# MAIN LOOP
+# MAIN EXECUTION
 # ============================================================
-def run_glove_loop():
-    global _stepper_dir, _last_pkt_t, sock, last_rx, _red_led_fail_until
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.bind((UDP_LISTEN_IP, UDP_PORT))
-    sock.settimeout(0.02)
-    last_rx = _last_pkt_t = time.time()
-    print(f"debug: Listening for UDP packets on {UDP_LISTEN_IP}:{UDP_PORT}...")
-    while True:
-        ultrasonic_tick()
-
-        now = time.time()
-        too_close = obstacle_too_close()
-        # חיווי אדום אם יש מכשול או אם יש כשל זיהוי בטיימר
-        fail_active = (now < _red_led_fail_until)
-
-        if too_close or fail_active:
-            GPIO.output(RED_LED_PIN, GPIO.LOW)  # דולק (PNP)
-        else:
-            GPIO.output(RED_LED_PIN, GPIO.HIGH)  # כבוי
-
-        if now - _last_pkt_t > STEP_CMD_STALE_SEC:
-            if _stepper_dir != 0: _stepper_dir = 0; _stepper.deenergize()
-
-        if _stepper_dir != 0: stepper_tick(_stepper_dir)
-
-        try:
-            data, _ = sock.recvfrom(1024)
-            if len(data) >= 3 and data[0] == FRAME_START and data[2] == FRAME_END:
-                handle_payload(data[1])
-                last_rx = time.time()
-        except socket.timeout:
-            if time.time() - last_rx > SILENCE_STOP_SEC: stop_drive()
-
-        time.sleep(CONTROL_PERIOD_SEC)
-
-
-
-def handle_payload(payload: int):
-    global prev_f0, prev_f1, prev_f2, prev_f3, _stepper_dir, _last_pkt_t
-    global _prev_drive_req, _prev_prev_drive_req, _ignore_ultra_active, _ignore_ultra_cmd
-
-    _last_pkt_t = time.time()
-
-    flex = (payload >> 4) & 0x0F
-    f0 = (flex >> 0) & 1
-    f1 = (flex >> 1) & 1
-    f2 = (flex >> 2) & 1
-    f3 = (flex >> 3) & 1
-
-    # ---- autonomy trigger (keep your existing behavior) ----
-    if (f0 == 1 and f1 == 1 and f2 == 1 and f3 == 1) and not (prev_f0 == 1 and prev_f1 == 1 and prev_f2 == 1 and prev_f3 == 1):
-        bring_bottle_xz()
-
-    # ---- servo edge detection ----
-    if f3 == 1 and prev_f3 == 0:
-        servo_move_step(1)  # close
-    if f2 == 1 and prev_f2 == 0:
-        servo_move_step(0)  # open
-
-    # ---- stepper held command ----
-    if f0 == 1 and f1 == 0:
-        _stepper_dir = -1
-    elif f1 == 1 and f0 == 0:
-        _stepper_dir = +1
-    else:
-        _stepper_dir = 0
-
-    # ---- update finger history for edge detection ----
-    prev_f0, prev_f1, prev_f2, prev_f3 = f0, f1, f2, f3
-
-    # ---- decode drive request ----
-    pitch_code = payload & 0x03
-    roll_code = (payload >> 2) & 0x03
-
-    if pitch_code == 0b01:
-        drive_req = "REV"
-    elif pitch_code == 0b10:
-        drive_req = "FWD"
-    elif roll_code == 0b01:
-        drive_req = "LEFT"
-    elif roll_code == 0b10:
-        drive_req = "RIGHT"
-    else:
-        drive_req = "STOP"
-
-    print(f"Received drive request: {drive_req} (payload: {payload:08b})")
-
-    too_close = obstacle_too_close()
-
-    # ------------------------------------------------------------
-    # Ignore-ultrasonic MODE logic:
-    # Arm when we see: X, STOP, X   (X in {FWD, LEFT, RIGHT})
-    # Keep active only while holding the same X.
-    # Disable when STOP or REV or direction change.
-    # ------------------------------------------------------------
-    allowed_dir = {"FWD", "LEFT", "RIGHT"}
-
-    # disable ignore mode if STOP/REV/changed dir
-    if _ignore_ultra_active:
-        if drive_req in ("STOP", "REV") or drive_req != _ignore_ultra_cmd:
-            _ignore_ultra_active = False
-            _ignore_ultra_cmd = None
-
-    # arm ignore mode on pattern X,STOP,X
-    if (not _ignore_ultra_active) and (drive_req in allowed_dir):
-        if _prev_drive_req == "STOP" and _prev_prev_drive_req == drive_req:
-            _ignore_ultra_active = True
-            _ignore_ultra_cmd = drive_req
-            print(f"[MODE] Ignoring ultrasonics while holding {drive_req}")
-
-    ignore_ultra_now = (_ignore_ultra_active and drive_req == _ignore_ultra_cmd)
-
-    # ---- apply drive (reverse always allowed) ----
-    if drive_req == "REV":
-        drive_reverse()
-
-    elif drive_req == "FWD":
-        if (not too_close) or ignore_ultra_now:
-            drive_forward()
-        else:
-            stop_drive()
-
-    elif drive_req == "LEFT":
-        if (not too_close) or ignore_ultra_now:
-            turn_left()
-        else:
-            stop_drive()
-
-    elif drive_req == "RIGHT":
-        if (not too_close) or ignore_ultra_now:
-            turn_right()
-        else:
-            stop_drive()
-
-    else:
-        stop_drive()
-
-    # ---- update drive history (requested commands) ----
-    _prev_prev_drive_req = _prev_drive_req
-    _prev_drive_req = drive_req
-
-
-
 if __name__ == "__main__":
     try:
-        init_vision();
-        run_glove_loop()
+        init_vision()
+        print("\n--- SYSTEM READY ---")
+        print("Type 'c' and press Enter to start bringing the bottle.")
+        print("Type 'q' and press Enter to quit.\n")
+        
+        while True:
+            cmd = input("Command (c/q): ").strip().lower()
+            if cmd == 'c':
+                bring_bottle_xz()
+            elif cmd == 'b':
+                track_bottle_continuous
+            elif cmd == 'q':
+                break
+                
     except KeyboardInterrupt:
-        pass
+        print("\n[INFO] Interrupted by user.")
     finally:
         stop_drive()
-        GPIO.output(RED_LED_PIN, GPIO.HIGH);
+        GPIO.output(RED_LED_PIN, GPIO.HIGH)
         GPIO.output(GREEN_LED_PIN, GPIO.HIGH)
-        GPIO.cleanup();
-        print("\n[OFF] System Stopped.")
+        shutdown_vision()
+        GPIO.cleanup()
+        print("[OFF] System Stopped.")
