@@ -569,7 +569,7 @@ def handle_payload(payload: int):
 
 if __name__ == "__main__":
     try:
-        init_vision();
+        init_vision()
         run_glove_loop()
     except KeyboardInterrupt:
         pass
