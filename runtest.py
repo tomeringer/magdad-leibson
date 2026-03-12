@@ -141,7 +141,8 @@ class YellowJacketEncoder:
 
     def zero(self): self.counts = self._c_last = 0
 
-enc = YellowJacketEncoder(pi_enc, 24, 25)
+enc_left = YellowJacketEncoder(pi_enc, 24, 25)
+enc_right = YellowJacketEncoder(pi_enc, 4, 18)
 
 class StepperMotor:
     def __init__(self, pins):
@@ -368,34 +369,72 @@ def shutdown_vision():
 # MOTION & AUTONOMY
 # ============================================================
 def drive_distance(d_cm, forward: bool):
-    enc.zero()
-    enc.update()
+    # Reset both encoders to zero
+    enc_left.zero()
+    enc_right.zero()
+    
+    # Initial update for both encoders
+    enc_left.update()
+    enc_right.update()
+    
     d_cm = d_cm - 1
     if forward:
         drive_forward()
     else:
         drive_reverse()
-    while abs(enc.output_revolutions()) * (math.pi * 7.2) < d_cm:
-        print("Distance traveled: " + str(enc.output_revolutions() * (math.pi * 7.2)))
+        
+    while True:
+        # Calculate the average revolutions from both encoders
+        avg_revs = (abs(enc_left.output_revolutions()) + abs(enc_right.output_revolutions())) / 2.0
+        dist_traveled = avg_revs * (math.pi * 7.2)
+        
+        if dist_traveled >= d_cm:
+            break
+            
+        print("Distance traveled: " + str(dist_traveled))
         time.sleep(0.01)
-        enc.update()
+        
+        # Update both encoders in the loop
+        enc_left.update()
+        enc_right.update()
+        
     stop_drive()
 
 def turn_angle(theta_rad, left_turn: bool):
     theta_rad = theta_rad - math.radians(5)
     print(theta_rad)
-    enc.zero()
-    enc.update()
+    
+    # Reset both encoders to zero
+    enc_left.zero()
+    enc_right.zero()
+    
+    # Initial update for both encoders
+    enc_left.update()
+    enc_right.update()
+    
     radius = 39.0 / 2.0
     segment = radius * abs(theta_rad)
+    
     if left_turn:
         turn_left(0.4)
     else:
         turn_right(0.4)
-    while abs(enc.output_revolutions()) * (math.pi * 7.2) < segment:
-        print("Distance traveled: " + str(enc.output_revolutions() * (math.pi * 7.2)))
+        
+    while True:
+        # Calculate the average revolutions from both encoders
+        avg_revs = (abs(enc_left.output_revolutions()) + abs(enc_right.output_revolutions())) / 2.0
+        dist_traveled = avg_revs * (math.pi * 7.2)
+        
+        if dist_traveled >= segment:
+            break
+            
+        print("Distance traveled: " + str(dist_traveled))
         time.sleep(0.01)
-        enc.update()
+        
+        # Update both encoders in the loop
+        enc_left.update()
+        enc_right.update()
+        
     stop_drive()
 
 def bring_bottle_xz():
