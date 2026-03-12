@@ -296,7 +296,7 @@ def detect_bottle_once():
                 alpha = math.atan2(X, Z)
                 r = math.hypot(X, Z)
                 alpha = alpha + math.radians(3)
-                X = math.sin(alpha) * r
+                X = math.sin(alpha) * r - 5 
                 Z = math.cos(alpha) * r
 
     t_proc = time.perf_counter() - t0
