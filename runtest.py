@@ -94,12 +94,10 @@ def drive_reverse(speed: float = 0.45):
     RIGHT_LPWM.value, LEFT_LPWM.value = speed + 0.04, speed
     RIGHT_RPWM.value, LEFT_RPWM.value = 0.0, 0.0
 
-
 def turn_right(speed: float = 0.10):
     RIGHT_LPWM.value, LEFT_RPWM.value = speed + 0.04, speed
     RIGHT_RPWM.value, LEFT_LPWM.value = 0.0, 0.0
     
-
 def turn_left(speed: float = 0.10):
     RIGHT_RPWM.value, LEFT_LPWM.value = speed + 0.04, speed
     RIGHT_LPWM.value, LEFT_RPWM.value = 0.0, 0.0
@@ -279,7 +277,7 @@ def init_vision():
     if _vision_ready:
         return
 
-    hard_reset_usb()
+    hard_reset_usb_all()
 
     print("[VISION] Initializing YOLO + stereo...", flush=True)
     _model = YOLO('Autonomy/yolov8n_ncnn_model', task='detect')
