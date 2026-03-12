@@ -344,7 +344,7 @@ def calculate_3d_coords(disparity, x, y, Q_matrix):
     w = hp[3]
     if w == 0:
         return (0, 0, 0)
-    X = hp[0] / w
+    X = hp[0] / w - 5 # calibration to actual center between cams
     Y = hp[1] / w
     Z = hp[2] / w
     return (X, Y, Z)
