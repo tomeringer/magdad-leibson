@@ -32,7 +32,7 @@ RIGHT_CAM = "/dev/v4l/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:
 
 W = 640
 H = 480
-CAM_FPS = 15
+CAM_FPS = 5
 DEFAULT_IMG_SIZE = (W, H)
 
 BOTTLE_CLASS_ID = 39
@@ -182,7 +182,7 @@ def open_cam(path: str, name: str):
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, W)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, H)
     cap.set(cv2.CAP_PROP_FPS, CAM_FPS)
-    cap.set(cv2.CAP_PROP_BUFFERSIZE, 2)
+    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
     for _ in range(10):
         cap.read()
