@@ -27,7 +27,7 @@ factory = PiGPIOFactory()
 # ---- Stereo / YOLO config ----
 CALIBRATION_FILE_PATH = r"Autonomy/stereo_calibration.pkl"
 LEFT_CAM = "/dev/v4l/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.4:1.0-video-index0"
-RIGHT_CAM = "/dev/v4l/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.1:1.0-video-index0"
+RIGHT_CAM = "/dev/v4l/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0"
 
 
 W = 640
@@ -232,10 +232,54 @@ def calculate_3d_coords(disparity, x, y, Q_matrix):
     Z = hp[2] / w
     return (X, Y, Z)
 
+def hard_reset_usb_all():
+    """ 
+    Forces the USB hub to reset. 
+    This is the software equivalent of unplugging and plugging back.
+    """
+    print("[SYSTEM] Starting mandatory USB reset for stability...", flush=True)
+    try:
+        # Unbind the hub 1-1
+        os.system("echo '1-1' | sudo tee /sys/bus/usb/drivers/usb/unbind > /dev/null")
+        time.sleep(2) # Give it a moment to power down
+        # Bind it back
+        os.system("echo '1-1' | sudo tee /sys/bus/usb/drivers/usb/bind > /dev/null")
+        print("[SYSTEM] USB Hub reset successful. Waiting for device enumeration...", flush=True)
+        time.sleep(4) # CRITICAL: Wait for Linux to recreate the /dev/video nodes
+    except Exception as e:
+        print(f"[ERROR] Could not perform USB reset: {e}")
+
+def hard_reset_usb():
+    # רשימת הפורטים הספציפיים של המצלמות שלך (לפי מה שראינו בטרמינל)
+    camera_ports = ['1-1.3', '1-1.4']
+    
+    print(f"[SYSTEM] Resetting specific camera ports: {camera_ports}...", flush=True)
+    
+    for port in camera_ports:
+        try:
+            # ניתוק לוגי של הפורט הספציפי
+            os.system(f"echo '{port}' | sudo tee /sys/bus/usb/drivers/usb/unbind > /dev/null")
+            print(f"  -> Port {port} unbound.")
+        except Exception: pass
+
+    time.sleep(2) # זמן "נשימה" לחומרה
+
+    for port in camera_ports:
+        try:
+            # חיבור מחדש של הפורט הספציפי
+            os.system(f"echo '{port}' | sudo tee /sys/bus/usb/drivers/usb/bind > /dev/null")
+            print(f"  -> Port {port} bound.")
+        except Exception: pass
+        
+    print("[SYSTEM] Specific reset complete. Waiting for recovery...", flush=True)
+    time.sleep(3)
+
 def init_vision():
     global _vision_ready, _model, _cap_l, _cap_r, _maps_l, _maps_r, _Q
     if _vision_ready:
         return
+
+    hard_reset_usb()
 
     print("[VISION] Initializing YOLO + stereo...", flush=True)
     _model = YOLO('Autonomy/yolov8n_ncnn_model', task='detect')
@@ -312,6 +356,7 @@ def detect_bottle_once():
         "conf": conf,
         "t_proc": t_proc
     }
+
 
 def shutdown_vision():
     global _cap_l, _cap_r
