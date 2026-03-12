@@ -142,7 +142,7 @@ class YellowJacketEncoder:
     def zero(self): self.counts = self._c_last = 0
 
 enc_left = YellowJacketEncoder(pi_enc, 24, 25)
-enc_right = YellowJacketEncoder(pi_enc, 4, 18)
+enc = YellowJacketEncoder(pi_enc, 4, 18)
 
 class StepperMotor:
     def __init__(self, pins):
@@ -369,72 +369,34 @@ def shutdown_vision():
 # MOTION & AUTONOMY
 # ============================================================
 def drive_distance(d_cm, forward: bool):
-    # Reset both encoders to zero
-    enc_left.zero()
-    enc_right.zero()
-    
-    # Initial update for both encoders
-    enc_left.update()
-    enc_right.update()
-    
+    enc.zero()
+    enc.update()
     d_cm = d_cm - 1
     if forward:
         drive_forward()
     else:
         drive_reverse()
-        
-    while True:
-        # Calculate the average revolutions from both encoders
-        avg_revs = (abs(enc_left.output_revolutions()) + abs(enc_right.output_revolutions())) / 2.0
-        dist_traveled = avg_revs * (math.pi * 7.2)
-        
-        if dist_traveled >= d_cm:
-            break
-            
-        print("Distance traveled: " + str(dist_traveled))
+    while abs(enc.output_revolutions()) * (math.pi * 7.2) < d_cm:
+        print("Distance traveled: " + str(enc.output_revolutions() * (math.pi * 7.2)))
         time.sleep(0.01)
-        
-        # Update both encoders in the loop
-        enc_left.update()
-        enc_right.update()
-        
+        enc.update()
     stop_drive()
 
 def turn_angle(theta_rad, left_turn: bool):
     theta_rad = theta_rad - math.radians(5)
     print(theta_rad)
-    
-    # Reset both encoders to zero
-    enc_left.zero()
-    enc_right.zero()
-    
-    # Initial update for both encoders
-    enc_left.update()
-    enc_right.update()
-    
+    enc.zero()
+    enc.update()
     radius = 39.0 / 2.0
     segment = radius * abs(theta_rad)
-    
     if left_turn:
         turn_left(0.4)
     else:
         turn_right(0.4)
-        
-    while True:
-        # Calculate the average revolutions from both encoders
-        avg_revs = (abs(enc_left.output_revolutions()) + abs(enc_right.output_revolutions())) / 2.0
-        dist_traveled = avg_revs * (math.pi * 7.2)
-        
-        if dist_traveled >= segment:
-            break
-            
-        print("Distance traveled: " + str(dist_traveled))
+    while abs(enc.output_revolutions()) * (math.pi * 7.2) < segment:
+        print("Distance traveled: " + str(enc.output_revolutions() * (math.pi * 7.2)))
         time.sleep(0.01)
-        
-        # Update both encoders in the loop
-        enc_left.update()
-        enc_right.update()
-        
+        enc.update()
     stop_drive()
 
 def bring_bottle_xz():
@@ -462,8 +424,6 @@ def bring_bottle_xz():
     print("Arrived at bottle location.")
     time.sleep(1)
     servo_move_step(0)
-    time.sleep(1)
-    drive_distance(math.hypot(found_bottle["Z"], found_bottle["X"]), False)
 
 def track_bottle_continuous():
     # Run continuous detection loop. Press Ctrl+C to exit this loop.
