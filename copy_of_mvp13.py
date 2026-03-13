@@ -276,10 +276,14 @@ class StepperMotor:
 
         # two-coil full-step sequence for stronger holding
         self.seq = [
-            [1, 0, 1, 0], # Phase 1
-            [0, 1, 1, 0], # Phase 2
-            [0, 1, 0, 1], # Phase 3
-            [1, 0, 0, 1]  # Phase 4
+            [1, 0, 0, 0],  # Step 1: Coil A only
+            [1, 0, 1, 0],  # Step 2: Coil A + Coil B (Your current Phase 1)
+            [0, 0, 1, 0],  # Step 3: Coil B only
+            [0, 1, 1, 0],  # Step 4: Coil B + Coil A reversed (Your current Phase 2)
+            [0, 1, 0, 0],  # ...and so on
+            [0, 1, 0, 1],
+            [0, 0, 0, 1],
+            [1, 0, 0, 1]
         ]
 
         self.current_idx = 0
@@ -290,7 +294,7 @@ class StepperMotor:
         self._write_step(self.current_idx)
 
     def _write_step(self, idx):
-        self.current_idx = idx % 4
+        self.current_idx = idx % 8
         for i, p in enumerate(self.pins):
             self.pi.write(p, self.seq[self.current_idx][i])
 
@@ -298,7 +302,7 @@ class StepperMotor:
         direction = 1 if direction >= 0 else -1
 
         for _ in range(int(steps)):
-            self.current_idx = (self.current_idx + direction) % 4
+            self.current_idx = (self.current_idx + direction) % 8
             self._write_step(self.current_idx)
             time.sleep(delay_sec)
 
