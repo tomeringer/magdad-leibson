@@ -27,13 +27,12 @@ factory = PiGPIOFactory()
 # ---- Stereo / YOLO config ----
 CALIBRATION_FILE_PATH = r"Autonomy/stereo_calibration.pkl"
 LEFT_CAM = "/dev/v4l/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.4:1.0-video-index0"
-RIGHT_CAM = "/dev/v4l/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.1:1.0-video-index0"
-LEFT_CAM = 0
-RIGHT_CAM = 2
+RIGHT_CAM = "/dev/v4l/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0"
+
 
 W = 640
 H = 480
-CAM_FPS = 15
+CAM_FPS = 5
 DEFAULT_IMG_SIZE = (W, H)
 
 BOTTLE_CLASS_ID = 39
@@ -87,19 +86,21 @@ LEFT_LPWM = PWMOutputDevice(21, frequency=1000, initial_value=0, pin_factory=fac
 def stop_drive():
     RIGHT_RPWM.value = RIGHT_LPWM.value = LEFT_RPWM.value = LEFT_LPWM.value = 0.0
 
-def drive_forward(speed: float = 0.5):
-    RIGHT_RPWM.value, LEFT_RPWM.value = speed + 0.01, speed
+def drive_forward(speed: float = 0.45):
+    RIGHT_RPWM.value, LEFT_RPWM.value = speed + 0.04, speed
     RIGHT_LPWM.value, LEFT_LPWM.value = 0.0, 0.0
 
-def drive_reverse():
-    RIGHT_LPWM.value, LEFT_LPWM.value = 0.51, 0.50
+def drive_reverse(speed: float = 0.45):
+    RIGHT_LPWM.value, LEFT_LPWM.value = speed + 0.04, speed
     RIGHT_RPWM.value, LEFT_RPWM.value = 0.0, 0.0
 
-def turn_right(speed: float = 0.5):
-    RIGHT_LPWM.value, LEFT_RPWM.value = speed + 0.01, speed
+def turn_right(speed: float = 0.10):
+    RIGHT_LPWM.value, LEFT_RPWM.value = speed + 0.04, speed
     RIGHT_RPWM.value, LEFT_LPWM.value = 0.0, 0.0
-
-def turn_left(speed: float = 0.5):
+    
+def turn_left(speed: float = 0.10):
+    RIGHT_RPWM.value, LEFT_LPWM.value = speed + 0.04, speed
+    RIGHT_LPWM.value, LEFT_RPWM.value = 0.0, 0.0
     RIGHT_RPWM.value, LEFT_LPWM.value = speed + 0.01, speed
     RIGHT_LPWM.value, LEFT_RPWM.value = 0.0, 0.0
 
@@ -140,7 +141,8 @@ class YellowJacketEncoder:
 
     def zero(self): self.counts = self._c_last = 0
 
-enc = YellowJacketEncoder(pi_enc, 24, 25)
+enc_left = YellowJacketEncoder(pi_enc, 24, 25)
+enc = YellowJacketEncoder(pi_enc, 4, 18)
 
 class StepperMotor:
     def __init__(self, pins):
@@ -181,7 +183,7 @@ def open_cam(path: str, name: str):
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, W)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, H)
     cap.set(cv2.CAP_PROP_FPS, CAM_FPS)
-    cap.set(cv2.CAP_PROP_BUFFERSIZE, 2)
+    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
     for _ in range(10):
         cap.read()
@@ -229,10 +231,54 @@ def calculate_3d_coords(disparity, x, y, Q_matrix):
     Z = hp[2] / w
     return (X, Y, Z)
 
+def hard_reset_usb_all():
+    """ 
+    Forces the USB hub to reset. 
+    This is the software equivalent of unplugging and plugging back.
+    """
+    print("[SYSTEM] Starting mandatory USB reset for stability...", flush=True)
+    try:
+        # Unbind the hub 1-1
+        os.system("echo '1-1' | sudo tee /sys/bus/usb/drivers/usb/unbind > /dev/null")
+        time.sleep(2) # Give it a moment to power down
+        # Bind it back
+        os.system("echo '1-1' | sudo tee /sys/bus/usb/drivers/usb/bind > /dev/null")
+        print("[SYSTEM] USB Hub reset successful. Waiting for device enumeration...", flush=True)
+        time.sleep(4) # CRITICAL: Wait for Linux to recreate the /dev/video nodes
+    except Exception as e:
+        print(f"[ERROR] Could not perform USB reset: {e}")
+
+def hard_reset_usb():
+    # רשימת הפורטים הספציפיים של המצלמות שלך (לפי מה שראינו בטרמינל)
+    camera_ports = ['1-1.3', '1-1.4']
+    
+    print(f"[SYSTEM] Resetting specific camera ports: {camera_ports}...", flush=True)
+    
+    for port in camera_ports:
+        try:
+            # ניתוק לוגי של הפורט הספציפי
+            os.system(f"echo '{port}' | sudo tee /sys/bus/usb/drivers/usb/unbind > /dev/null")
+            print(f"  -> Port {port} unbound.")
+        except Exception: pass
+
+    time.sleep(2) # זמן "נשימה" לחומרה
+
+    for port in camera_ports:
+        try:
+            # חיבור מחדש של הפורט הספציפי
+            os.system(f"echo '{port}' | sudo tee /sys/bus/usb/drivers/usb/bind > /dev/null")
+            print(f"  -> Port {port} bound.")
+        except Exception: pass
+        
+    print("[SYSTEM] Specific reset complete. Waiting for recovery...", flush=True)
+    time.sleep(3)
+
 def init_vision():
     global _vision_ready, _model, _cap_l, _cap_r, _maps_l, _maps_r, _Q
     if _vision_ready:
         return
+
+    hard_reset_usb_all()
 
     print("[VISION] Initializing YOLO + stereo...", flush=True)
     _model = YOLO('Autonomy/yolov8n_ncnn_model', task='detect')
@@ -297,7 +343,7 @@ def detect_bottle_once():
                 alpha = math.atan2(X, Z)
                 r = math.hypot(X, Z)
                 alpha = alpha + math.radians(3)
-                X = math.sin(alpha) * r
+                X = math.sin(alpha) * r - 5 
                 Z = math.cos(alpha) * r
 
     t_proc = time.perf_counter() - t0
@@ -309,6 +355,7 @@ def detect_bottle_once():
         "conf": conf,
         "t_proc": t_proc
     }
+
 
 def shutdown_vision():
     global _cap_l, _cap_r
@@ -352,61 +399,6 @@ def turn_angle(theta_rad, left_turn: bool):
         enc.update()
     stop_drive()
 
-def bring_bottle_xz_13():
-    print("[AUTO] Starting detection loop...")
-
-    # Ensure gripper is open before starting movement
-    servo_move_step(0)
-    time.sleep(1)
-
-    start_time = time.time()
-    found_bottle = {"found": False}
-
-    # Detection loop for 5 seconds to minimize detection errors (BER)
-    while (time.time() - start_time) < 5.0:
-        found_bottle = detect_bottle_once()
-        if found_bottle["found"]:
-            break
-        time.sleep(0.1)
-
-    if found_bottle["found"]:
-        # Success: Turn on green LEDs
-
-        GPIO.output(GREEN_LED_PIN, GPIO.LOW)
-        time.sleep(1)
-
-        # Turn off green LEDs right before driving
-        GPIO.output(GREEN_LED_PIN, GPIO.HIGH)
-
-        # Movement and grasping sequence
-        alpha = math.atan2(found_bottle['X'], 22 + found_bottle['Z'])
-        turn_angle(alpha, alpha < 0)
-        drive_distance(math.hypot(found_bottle["Z"], found_bottle["X"]), True)
-
-        time.sleep(1)
-        servo_move_step(1)  # Close gripper
-        time.sleep(1)
-
-        # Raise arm 30 degrees (170 steps)
-        _stepper.step_chunk(170, direction=1, delay_sec=STEPPER_STEP_DELAY_SEC)
-        time.sleep(0.5)
-
-        drive_distance(math.hypot(found_bottle["Z"], found_bottle["X"]), False)
-
-        # Lower arm back down
-        _stepper.step_chunk(170, direction=-1, delay_sec=STEPPER_STEP_DELAY_SEC)
-        time.sleep(0.5)
-
-        servo_move_step(0)  # Release gripper
-        time.sleep(1)
-    else:
-        # Failure: Turn on red LED for 5 seconds directly
-        print("[AUTO] Timeout: Bottle not found.")
-        GPIO.output(RED_LED_PIN, GPIO.LOW)
-        time.sleep(5.0)
-        GPIO.output(RED_LED_PIN, GPIO.HIGH)
-
-
 def bring_bottle_xz():
     time.sleep(2)
     z0 = 22
@@ -432,8 +424,6 @@ def bring_bottle_xz():
     print("Arrived at bottle location.")
     time.sleep(1)
     servo_move_step(0)
-    time.sleep(1)
-    drive_distance(math.hypot(found_bottle["Z"], found_bottle["X"]), False)
 
 def track_bottle_continuous():
     # Run continuous detection loop. Press Ctrl+C to exit this loop.

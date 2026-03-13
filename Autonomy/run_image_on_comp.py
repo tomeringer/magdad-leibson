@@ -10,7 +10,7 @@ from ultralytics import YOLO
 # ============================================================
 # Use integer indices for PC webcams (e.g., 0, 1, 2)
 LEFT_CAM = 1
-RIGHT_CAM = 2
+RIGHT_CAM = 0
 
 CALIBRATION_FILE_PATH = "C:\\Users\\TLP-001\\Desktop\\magdad-leibson\\Autonomy\\stereo_calibration.pkl"
 
@@ -195,8 +195,8 @@ def detect_bottle_once():
 
                 alpha = math.atan2(X, Z)
                 r = math.hypot(X, Z)
-                alpha = alpha + math.radians(3)
-                X = math.sin(alpha) * r
+                alpha = alpha + math.radians(3.17)
+                X = math.sin(alpha) * r - 5
                 Z = math.cos(alpha) * r
                 
                 # Draw rectangle and 3D data on left frame
@@ -235,6 +235,22 @@ def shutdown_vision():
         pass
 
 
+def draw_grid(img, width, height):
+    # Center lines (Vertical and Horizontal)
+    cv2.line(img, (width // 2, 0), (width // 2, height), (0, 255, 255), 1) # Yellow
+    cv2.line(img, (0, height // 2), (width, height // 2), (0, 255, 255), 1)
+    
+    # Optional: 1/4 and 3/4 markers for a more "grid" feel
+    # Vertical grid lines
+    cv2.line(img, (width // 4, 0), (width // 4, height), (50, 50, 50), 1)
+    cv2.line(img, (3 * width // 4, 0), (3 * width // 4, height), (50, 50, 50), 1)
+    
+    # Horizontal grid lines
+    cv2.line(img, (0, height // 4), (width, height // 4), (50, 50, 50), 1)
+    cv2.line(img, (0, 3 * height // 4), (width, 3 * height // 4), (50, 50, 50), 1)
+
+
+
 # ============================================================
 # MAIN PC LOOP
 # ============================================================
@@ -251,6 +267,10 @@ def track_bottle_on_pc():
             
             # Display frames if they were successfully read
             if frame_l is not None and frame_r is not None:
+
+                # Draw the grid on each frame
+                draw_grid(frame_l, W, H)
+                draw_grid(frame_r, W, H)
                 # Add labels to the frames
                 cv2.putText(frame_l, "LEFT CAM", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
                 cv2.putText(frame_r, "RIGHT CAM", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
