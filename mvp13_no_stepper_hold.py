@@ -422,6 +422,7 @@ def run_glove_loop():
             GPIO.output(RED_LED_PIN, GPIO.HIGH)  # ×›×‘×•×™
 
         if _arm_dir != 0: run_arm(_arm_dir == 1)
+        else: stop_arm()
 
         try:
             data, _ = sock.recvfrom(1024)
