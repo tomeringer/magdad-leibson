@@ -68,9 +68,9 @@ def video_left():
     return Response(generate_frames(cap_l), mimetype='multipart/x-mixed-replace; boundary=frame')
 
 # Right stream route
-@app.route('/video_right')
-def video_right():
-    return Response(generate_frames(cap_r), mimetype='multipart/x-mixed-replace; boundary=frame')
+# @app.route('/video_right')
+# def video_right():
+#     return Response(generate_frames(cap_r), mimetype='multipart/x-mixed-replace; boundary=frame')
 
 if __name__ == '__main__':
     # Start server on all network interfaces
