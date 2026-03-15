@@ -440,6 +440,51 @@ def turn_angle(theta_rad, left_turn: bool):
     stop_drive()
 
 
+def drive_arc(target_x, target_z):
+    L = 39.0  # Track width (distance between wheels)
+
+    # 1. Calculate the radius of the arc
+    # R is the distance from the Integrated Center of Rotation (ICR) to robot center
+    R = (target_x ** 2 + target_z ** 2) / (2 * abs(target_x))
+
+    # 2. Define wheel radii
+    r_inner = R - (L / 2)
+    r_outer = R + (L / 2)
+
+    # 3. Calculate Speed Ratio
+    # Faster speed / Slower speed = r_outer / r_inner
+    speed_inner = 0.3
+    speed_outer = speed_inner * (r_outer / r_inner)
+
+    # 4. Determine which wheel is which
+    if target_x > 0:  # Turning Right
+        v_left = speed_outer
+        v_right = speed_inner
+    else:  # Turning Left
+        v_left = speed_inner
+        v_right = speed_outer
+
+    # 5. Calculate target distance for the center of the robot
+    # Angle of the arc (theta) * Radius
+    angle = math.atan2(target_z, R - abs(target_x))
+    total_arc_length = R * angle
+
+    RIGHT_RPWM.value, LEFT_RPWM.value = v_right * 1.08, v_left
+    RIGHT_LPWM.value, LEFT_LPWM.value = 0.0, 0.0
+
+    # 6. Monitor distance
+    enc_left.zero()
+    enc_right.zero()
+    current_dist = 0
+    while current_dist < total_arc_length:
+        enc_left.update()
+        enc_right.update()
+        current_dist = get_average_distance()
+        time.sleep(0.01)
+
+    stop_drive()
+
+
 def bring_bottle_xz():
     time.sleep(2)
     z0 = 21.0
