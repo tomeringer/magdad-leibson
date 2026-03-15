@@ -142,7 +142,7 @@ class YellowJacketEncoder:
     def zero(self): self.counts = self._c_last = 0
 
 enc_left = YellowJacketEncoder(pi_enc, 24, 25)
-enc = YellowJacketEncoder(pi_enc, 4, 18)
+enc = YellowJacketEncoder(pi_enc, 5, 6)
 
 class StepperMotor:
     def __init__(self, pins):
