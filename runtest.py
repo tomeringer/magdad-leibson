@@ -380,7 +380,7 @@ def get_average_distance():
     dist_right = abs(enc_right.output_revolutions()) * WHEEL_CIRCUMFERENCE
     
     # Return the average distance
-    return (dist_left + dist_right) / 2.0
+    return (dist_left + dist_left) / 2.0
 
 def drive_distance(d_cm, forward: bool):
     # Reset and update both encoders before starting
@@ -409,6 +409,14 @@ def drive_distance(d_cm, forward: bool):
         time.sleep(0.01)
         
     stop_drive()
+
+
+def encoder_test(left: bool, dist: float):
+    print(f"Testing {'left' if left else 'right'} encoder for {dist} cm...")
+    drive_distance(dist, forward=True)
+    time.sleep(1)
+    drive_distance(dist, forward=False)
+    print("Encoder test completed.")
 
 def turn_angle(theta_rad, left_turn: bool):
     print(theta_rad)
