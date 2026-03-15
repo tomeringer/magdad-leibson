@@ -238,98 +238,72 @@ def calculate_3d_coords(disparity, x, y, Q_matrix):
     return (hp[0] / w, hp[1] / w, hp[2] / w)
 
 def vision_background_worker():
-    """ 
-    This thread continuously reads cameras, runs YOLO, draws bounding boxes 
-    and updates the global frame for the Flask server to broadcast.
-    """
     global _global_stream_frame, _global_bottle_data, _vision_running
     blank_frame = np.zeros((H, W, 3), dtype=np.uint8)
+    
+    # Process only every N-th frame with YOLO to keep FPS high
+    frame_count = 0
+    yolo_skip = 2 
 
     while _vision_running:
-        # Read from cameras
-        success_l, frame_l_orig = _cap_l.read()
-        success_r, frame_r_orig = _cap_r.read()
+        # 1. Rapidly Grab both (to keep buffer fresh)
+        _cap_l.grab()
+        _cap_r.grab()
+        
+        # 2. Retrieve only if grab was successful
+        success_l, frame_l_orig = _cap_l.retrieve()
+        success_r, frame_r_orig = _cap_r.retrieve()
 
-        # Handle hardware timeouts securely
-        if not success_l or frame_l_orig is None:
-            frame_l_orig = blank_frame.copy()
-            cv2.putText(frame_l_orig, "LEFT: NO SIGNAL", (150, 240), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 3)
-        if not success_r or frame_r_orig is None:
-            frame_r_orig = blank_frame.copy()
-            cv2.putText(frame_r_orig, "RIGHT: NO SIGNAL", (150, 240), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 3)
-
-        # Skip YOLO if we lost cameras
-        if not success_l or not success_r:
-            _global_stream_frame = np.hstack((frame_l_orig, frame_r_orig))
+        if not success_l or frame_l_orig is None or not success_r or frame_r_orig is None:
+            time.sleep(0.01)
             continue
 
-        # Rectify frames
+        # 3. Rectify (Essential for distance)
         frame_l = cv2.remap(frame_l_orig, _maps_l[0], _maps_l[1], cv2.INTER_LINEAR)
         frame_r = cv2.remap(frame_r_orig, _maps_r[0], _maps_r[1], cv2.INTER_LINEAR)
 
-        # YOLO inference
-        results_l = _model.predict(frame_l, conf=YOLO_CONF, classes=[BOTTLE_CLASS_ID], verbose=False)
-        results_r = _model.predict(frame_r, conf=YOLO_CONF, classes=[BOTTLE_CLASS_ID], verbose=False)
-
-        X = Y = Z = None
-        cx = cy = disparity = None
         found_match = False
+        X = Y = Z = cx = cy = None
 
-        # Check left camera for bottle
-        if results_l and len(results_l[0].boxes) > 0:
-            box_l = results_l[0].boxes[0]
-            cx = int(box_l.xywh[0][0].item())
-            cy = int(box_l.xywh[0][1].item())
-            x1_l, y1_l, x2_l, y2_l = map(int, box_l.xyxy[0])
-
-            closest_box_r = None
-            if results_r and len(results_r[0].boxes) > 0:
-                for box_r in results_r[0].boxes:
-                    y_r = int(box_r.xywh[0][1].item())
-                    if abs(cy - y_r) < MATCH_Y_TOL:
-                        closest_box_r = box_r
-                        break
-
-            if closest_box_r is not None:
-                x_r = int(closest_box_r.xywh[0][0].item())
-                disparity = abs(cx - x_r)
+        # 4. Run YOLO only every X frames and ONLY on LEFT camera
+        frame_count += 1
+        if frame_count % yolo_skip == 0:
+            results_l = _model.predict(frame_l, conf=YOLO_CONF, classes=[BOTTLE_CLASS_ID], verbose=False)
+            
+            if results_l and len(results_l[0].boxes) > 0:
+                box_l = results_l[0].boxes[0]
+                cx = int(box_l.xywh[0][0].item())
+                cy = int(box_l.xywh[0][1].item())
+                x1_l, y1_l, x2_l, y2_l = map(int, box_l.xyxy[0])
                 
-                # Bounding box for right frame
-                x1_r, y1_r, x2_r, y2_r = map(int, closest_box_r.xyxy[0])
-                cv2.rectangle(frame_r, (x1_r, y1_r), (x2_r, y2_r), (255, 0, 0), 2)
-                cv2.putText(frame_r, "Matched", (x1_r, y1_r - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 2)
+                # DRAW on Left
+                cv2.rectangle(frame_l, (x1_l, y1_l), (x2_l, y2_l), (0, 255, 0), 2)
 
-                if disparity > 0:
-                    X_raw, Y_raw, Z_raw = calculate_3d_coords(disparity, cx, cy, _Q)
-                    
-                    # Apply specific geometry corrections
-                    alpha = math.atan2(X_raw, Z_raw)
-                    r = math.hypot(X_raw, Z_raw)
-                    alpha = alpha + math.radians(3)
-                    X = math.sin(alpha) * r - 5 
-                    Y = Y_raw
-                    Z = math.cos(alpha) * r
-                    found_match = True
+                # 5. Instead of full YOLO on Right, let's just look for the bottle in the same Y area
+                # For now, to keep it simple and FAST, we will run YOLO on Right ONLY if Left found something
+                results_r = _model.predict(frame_r, conf=YOLO_CONF, classes=[BOTTLE_CLASS_ID], verbose=False)
+                
+                if results_r and len(results_r[0].boxes) > 0:
+                    for box_r in results_r[0].boxes:
+                        x_r = int(box_r.xywh[0][0].item())
+                        y_r = int(box_r.xywh[0][1].item())
+                        if abs(cy - y_r) < MATCH_Y_TOL:
+                            disparity = abs(cx - x_r)
+                            if disparity > 0:
+                                X_raw, Y_raw, Z_raw = calculate_3d_coords(disparity, cx, cy, _Q)
+                                # Geometry corrections
+                                alpha = math.atan2(X_raw, Z_raw) + math.radians(3)
+                                r_dist = math.hypot(X_raw, Z_raw)
+                                X, Y, Z = math.sin(alpha)*r_dist - 5, Y_raw, math.cos(alpha)*r_dist
+                                found_match = True
+                                
+                                # Draw on Right
+                                x1_r, y1_r, x2_r, y2_r = map(int, box_r.xyxy[0])
+                                cv2.rectangle(frame_r, (x1_r, y1_r), (x2_r, y2_r), (255, 0, 0), 2)
+                                cv2.putText(frame_l, f"Z:{Z:.1f}cm", (x1_l, y1_l-10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,0), 2)
 
-                    # Draw bounding box and accurate coordinates on left frame
-                    cv2.rectangle(frame_l, (x1_l, y1_l), (x2_l, y2_l), (0, 255, 0), 2)
-                    coord_text = f"X: {X:.1f}  Y: {Y:.1f}  Z: {Z:.1f}"
-                    # Background for text to make it readable
-                    cv2.rectangle(frame_l, (x1_l, y1_l - 30), (x1_l + 250, y1_l), (0, 255, 0), -1)
-                    cv2.putText(frame_l, coord_text, (x1_l + 5, y1_l - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
-            else:
-                # Bottle found in left but no match in right
-                cv2.rectangle(frame_l, (x1_l, y1_l), (x2_l, y2_l), (0, 165, 255), 2)
-                cv2.putText(frame_l, "No Match", (x1_l, y1_l - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 165, 255), 2)
-
-        # Update global state for Robot Autonomy logic
-        _global_bottle_data = {
-            "found": found_match,
-            "X": X, "Y": Y, "Z": Z,
-            "cx": cx, "cy": cy
-        }
-
-        # Update global frame for Flask server
+        # Update Globals
+        _global_bottle_data = {"found": found_match, "X": X, "Y": Y, "Z": Z, "cx": cx, "cy": cy}
         _global_stream_frame = np.hstack((frame_l, frame_r))
 
 def init_vision_and_threads():
