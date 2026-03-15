@@ -7,7 +7,7 @@ app = Flask(__name__)
 
 # Define hardware paths based on physical USB ports
 LEFT_CAM_PATH = "/dev/v4l/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.4:1.0-video-index0"
-RIGHT_CAM_PATH = "/dev/v4l/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0"
+RIGHT_CAM_PATH = "/dev/v4l/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.1:1.0-video-index0"
 
 # Resolve the absolute paths to their actual /dev/videoX mappings
 real_left_path = os.path.realpath(LEFT_CAM_PATH)
