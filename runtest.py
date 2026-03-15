@@ -513,7 +513,7 @@ def bring_bottle_xz():
         else:   
             print("No bottle detected.")
 
-    # turn_angle(alpha, alpha < 0)
+    turn_angle(alpha, alpha < 0)
     print("Completed turn towards bottle.")
     time.sleep(2)
     drive_distance(math.hypot(found_bottle["Z"], found_bottle["X"]), True)
