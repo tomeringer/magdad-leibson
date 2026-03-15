@@ -87,7 +87,7 @@ def stop_drive():
     RIGHT_RPWM.value = RIGHT_LPWM.value = LEFT_RPWM.value = LEFT_LPWM.value = 0.0
 
 def drive_forward(speed: float = 0.3):
-    RIGHT_RPWM.value, LEFT_RPWM.value = speed + 0.04, speed
+    RIGHT_RPWM.value, LEFT_RPWM.value = speed, speed
     RIGHT_LPWM.value, LEFT_LPWM.value = 0.0, 0.0
 
 def drive_reverse(speed: float = 0.45):
