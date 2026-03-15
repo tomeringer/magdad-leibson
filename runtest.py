@@ -419,7 +419,7 @@ def turn_angle(theta_rad, left_turn: bool):
     enc_left.update()
     enc_right.update()
     
-    radius = 39.0 / 2.0
+    radius = 36.0 / 2.0
     segment = radius * abs(theta_rad)
     
     if left_turn:
@@ -443,7 +443,7 @@ def turn_angle(theta_rad, left_turn: bool):
 
 
 def drive_arc(target_x, target_z):
-    L = 39.0  # Track width (distance between wheels)
+    L = 36.0  # Track width (distance between wheels)
 
     # 1. Calculate the radius of the arc
     # R is the distance from the Integrated Center of Rotation (ICR) to robot center
