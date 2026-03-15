@@ -59,7 +59,7 @@ STEPPER_STEP_DELAY_SEC = 0.0015
 STEPPER_TICK_SEC = 0.05
 _last_stepper_cmd_t = 0.0
 STEP_CMD_STALE_SEC = 0.12
-_stepper_dir = 0
+_arm_dir = 0
 _last_pkt_t = 0.0
 sock = None
 last_rx = 0.0
@@ -176,6 +176,9 @@ RIGHT_LPWM = PWMOutputDevice(3, frequency=1000, initial_value=0, pin_factory=fac
 LEFT_RPWM = PWMOutputDevice(20, frequency=1000, initial_value=0, pin_factory=factory)
 LEFT_LPWM = PWMOutputDevice(21, frequency=1000, initial_value=0, pin_factory=factory)
 
+ARM_RPWM = PWMOutputDevice(27, frequency=1000, initial_value=0, pin_factory=factory)
+ARM_LPWM = PWMOutputDevice(22, frequency=1000, initial_value=0, pin_factory=factory)
+
 
 # def stop_drive():
 #     RIGHT_RPWM.value = RIGHT_LPWM.value = LEFT_RPWM.value = LEFT_LPWM.value = 0.0
@@ -267,63 +270,14 @@ class YellowJacketEncoder:
 enc = YellowJacketEncoder(pi_enc, 24, 25)
 
 
-class StepperMotor:
-    def __init__(self, pins):
-        self.pins, self.pi = pins, pigpio.pi()
+def run_arm(forward: bool):
+    if forward:
+        ARM_LPWM.value, ARM_RPWM.value = 1, 0
+    else:
+        ARM_LPWM.value, ARM_RPWM.value = 0, 1
 
-
-
-        self.seq = [
-            [1, 0, 1, 0],
-            [1, 0, 0, 1],
-            [0, 1, 0, 1],
-            [0, 1, 1, 0]
-        ]
-        for p in self.pins: self.pi.set_mode(p, pigpio.OUTPUT)
-
-
-
-
-
-
-
-
-
-
-
-
-    def step_chunk(self, steps, direction=1, delay_sec=0.002):
-        direction = 1 if direction >= 0 else -1
-
-        for _ in range(int(steps)):
-            for step in range(4):
-                idx = step if direction == 1 else 3 - step
-                for i, p in enumerate(self.pins): self.pi.write(p, self.seq[idx][i])
-                time.sleep(delay_sec)
-        self.deenergize()
-
-
-
-
-
-
-    def deenergize(self):
-        for p in self.pins: self.pi.write(p, 0)
-
-
-    def close(self):
-        self.deenergize(); self.pi.stop()
-
-
-
-_stepper = StepperMotor([23, 22, 27, 17])
-
-
-def stepper_tick(direction: int):
-    global _last_stepper_cmd_t
-    if time.time() - _last_stepper_cmd_t >= STEPPER_TICK_SEC:
-        _last_stepper_cmd_t = time.time()
-        _stepper.step_chunk(STEPPER_CHUNK, direction=direction, delay_sec=STEPPER_STEP_DELAY_SEC)
+def stop_arm():
+    ARM_RPWM.value, ARM_LPWM.value = 0, 0
 
 
 # ============================================================
@@ -427,13 +381,13 @@ def bring_bottle_xz():
         time.sleep(1)
 
         # ×”×¨×ž×ª ×–×¨×•×¢ 30 ×ž×¢×œ×•×ª (170 ×¦×¢×“×™×)
-        _stepper.step_chunk(170, direction=1, delay_sec=STEPPER_STEP_DELAY_SEC)
+        # _stepper.step_chunk(170, direction=1, delay_sec=STEPPER_STEP_DELAY_SEC)
         time.sleep(0.5)
 
         drive_distance(math.hypot(found_bottle["Z"], found_bottle["X"]), False)
 
         # ×”×•×¨×“×ª ×–×¨×•×¢ ×—×–×¨×”
-        _stepper.step_chunk(170, direction=-1, delay_sec=STEPPER_STEP_DELAY_SEC)
+        # _stepper.step_chunk(170, direction=-1, delay_sec=STEPPER_STEP_DELAY_SEC)
         time.sleep(0.5)
 
         servo_move_step(0)  # ×©×—×¨×•×¨
@@ -448,7 +402,7 @@ def bring_bottle_xz():
 # MAIN LOOP
 # ============================================================
 def run_glove_loop():
-    global _stepper_dir, _last_pkt_t, sock, last_rx, _red_led_fail_until
+    global _arm_dir, _last_pkt_t, sock, last_rx, _red_led_fail_until
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind((UDP_LISTEN_IP, UDP_PORT))
     sock.settimeout(0.02)
@@ -467,11 +421,8 @@ def run_glove_loop():
         else:
             GPIO.output(RED_LED_PIN, GPIO.HIGH)  # ×›×‘×•×™
 
-        if now - _last_pkt_t > STEP_CMD_STALE_SEC:
-            if _stepper_dir != 0: _stepper_dir = 0; _stepper.deenergize()
-
-
-        if _stepper_dir != 0: stepper_tick(_stepper_dir)
+        if _arm_dir != 0: run_arm(_arm_dir == 1)
+        else: stop_arm()
 
         try:
             data, _ = sock.recvfrom(1024)
@@ -485,7 +436,7 @@ def run_glove_loop():
 
 
 def handle_payload(payload: int):
-    global prev_f0, prev_f1, prev_f2, prev_f3, _stepper_dir, _last_pkt_t
+    global prev_f0, prev_f1, prev_f2, prev_f3, _arm_dir, _last_pkt_t
     global _prev_drive_req, _prev_prev_drive_req, _ignore_ultra_active, _ignore_ultra_cmd
 
     _last_pkt_t = time.time()
@@ -508,11 +459,11 @@ def handle_payload(payload: int):
 
     # ---- stepper held command ----
     if f0 == 1 and f1 == 0:
-        _stepper_dir = -1
+        _arm_dir = -1
     elif f1 == 1 and f0 == 0:
-        _stepper_dir = +1
+        _arm_dir = +1
     else:
-        _stepper_dir = 0
+        _arm_dir = 0
 
     # ---- update finger history for edge detection ----
     prev_f0, prev_f1, prev_f2, prev_f3 = f0, f1, f2, f3
