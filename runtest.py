@@ -380,7 +380,7 @@ def get_average_distance():
     dist_right = abs(enc_right.output_revolutions()) * WHEEL_CIRCUMFERENCE
     
     # Return the average distance
-    return (dist_right + dist_right) / 2.0
+    return (dist_left + dist_left) / 2.0
 
 def drive_distance(d_cm, forward: bool):
     # Reset and update both encoders before starting
