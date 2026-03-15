@@ -142,7 +142,7 @@ class YellowJacketEncoder:
     def zero(self): self.counts = self._c_last = 0
 
 enc_left = YellowJacketEncoder(pi_enc, 24, 25)
-enc = YellowJacketEncoder(pi_enc, 9, 10)
+enc_right = YellowJacketEncoder(pi_enc, 9, 10)
 
 class StepperMotor:
     def __init__(self, pins):
@@ -368,36 +368,79 @@ def shutdown_vision():
 # ============================================================
 # MOTION & AUTONOMY
 # ============================================================
+import math
+import time
+
+# Define the circumference of the wheel to avoid calculating it repeatedly
+WHEEL_CIRCUMFERENCE = math.pi * 7.2
+
+def get_average_distance():
+    # Calculate the distance traveled by both left and right encoders
+    dist_left = abs(enc_left.output_revolutions()) * WHEEL_CIRCUMFERENCE
+    dist_right = abs(enc_right.output_revolutions()) * WHEEL_CIRCUMFERENCE
+    
+    # Return the average distance
+    return (dist_left + dist_right) / 2.0
+
 def drive_distance(d_cm, forward: bool):
-    enc.zero()
-    enc.update()
+    # Reset and update both encoders before starting
+    enc_left.zero()
+    enc_right.zero()
+    enc_left.update()
+    enc_right.update()
+    
     d_cm = d_cm - 1
+    
     if forward:
         drive_forward()
     else:
         drive_reverse()
-    while abs(enc.output_revolutions()) * (math.pi * 7.2) < d_cm:
-        print("Distance traveled: " + str(enc.output_revolutions() * (math.pi * 7.2)))
+        
+    current_dist = 0
+    while current_dist < d_cm:
+        # Update both encoders in the loop
+        enc_left.update()
+        enc_right.update()
+        
+        # Calculate current average distance
+        current_dist = get_average_distance()
+        
+        print("Distance traveled: " + str(current_dist))
         time.sleep(0.01)
-        enc.update()
+        
     stop_drive()
 
 def turn_angle(theta_rad, left_turn: bool):
-    # theta_rad = theta_rad - math.radians(5)
     print(theta_rad)
-    enc.zero()
-    enc.update()
+    
+    # Reset and update both encoders before starting
+    enc_left.zero()
+    enc_right.zero()
+    enc_left.update()
+    enc_right.update()
+    
     radius = 39.0 / 2.0
     segment = radius * abs(theta_rad)
+    
     if left_turn:
         turn_left(0.4)
     else:
         turn_right(0.4)
-    while abs(enc.output_revolutions()) * (math.pi * 7.2) < segment:
-        print("Distance traveled: " + str(enc.output_revolutions() * (math.pi * 7.2)))
+        
+    current_dist = 0
+    while current_dist < segment:
+        # Update both encoders in the loop
+        enc_left.update()
+        enc_right.update()
+        
+        # Calculate current average distance
+        current_dist = get_average_distance()
+        
+        print("Distance traveled: " + str(current_dist))
         time.sleep(0.01)
-        enc.update()
+        
     stop_drive()
+
 
 def bring_bottle_xz():
     time.sleep(2)
