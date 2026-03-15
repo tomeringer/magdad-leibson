@@ -455,8 +455,8 @@ def drive_arc(target_x, target_z):
 
     # 3. Calculate Speed Ratio
     # Faster speed / Slower speed = r_outer / r_inner
-    speed_inner = 0.3
-    speed_outer = speed_inner * (r_outer / r_inner)
+    speed_outer = 0.3
+    speed_inner = speed_outer * (r_inner / r_outer)
 
     # 4. Determine which wheel is which
     if target_x > 0:  # Turning Right
