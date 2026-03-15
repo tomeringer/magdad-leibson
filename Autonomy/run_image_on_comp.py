@@ -9,8 +9,8 @@ from ultralytics import YOLO
 # PC CONFIGURATION
 # ============================================================
 # Use integer indices for PC webcams (e.g., 0, 1, 2)
-LEFT_CAM = 1
-RIGHT_CAM = 0
+LEFT_CAM = 0
+RIGHT_CAM = 1
 
 CALIBRATION_FILE_PATH = "C:\\Users\\TLP-001\\Desktop\\magdad-leibson\\Autonomy\\stereo_calibration.pkl"
 
