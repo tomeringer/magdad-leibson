@@ -423,9 +423,9 @@ def turn_angle(theta_rad, left_turn: bool):
     segment = radius * abs(theta_rad)
     
     if left_turn:
-        turn_left(0.1)
+        turn_left(0.2)
     else:
-        turn_right(0.1)
+        turn_right(0.2)
         
     current_dist = 0
     while current_dist < segment:
