@@ -86,20 +86,22 @@ LEFT_LPWM = PWMOutputDevice(21, frequency=1000, initial_value=0, pin_factory=fac
 def stop_drive():
     RIGHT_RPWM.value = RIGHT_LPWM.value = LEFT_RPWM.value = LEFT_LPWM.value = 0.0
 
+speed_diff = 1.08
+
 def drive_forward(speed: float = 0.3):
-    RIGHT_RPWM.value, LEFT_RPWM.value = speed + 0.01, speed
+    RIGHT_RPWM.value, LEFT_RPWM.value = speed * speed_diff, speed
     RIGHT_LPWM.value, LEFT_LPWM.value = 0.0, 0.0
 
 def drive_reverse(speed: float = 0.45):
-    RIGHT_LPWM.value, LEFT_LPWM.value = speed + 0.01, speed
+    RIGHT_LPWM.value, LEFT_LPWM.value = speed * speed_diff, speed
     RIGHT_RPWM.value, LEFT_RPWM.value = 0.0, 0.0
 
 def turn_right(speed: float = 0.1):
-    RIGHT_LPWM.value, LEFT_RPWM.value = speed+ 0.01, speed
+    RIGHT_LPWM.value, LEFT_RPWM.value = speed * speed_diff, speed
     RIGHT_RPWM.value, LEFT_LPWM.value = 0.0, 0.0
     
 def turn_left(speed: float = 0.1):
-    RIGHT_RPWM.value, LEFT_LPWM.value = speed + 0.01, speed
+    RIGHT_RPWM.value, LEFT_LPWM.value = speed * speed_diff, speed
     RIGHT_LPWM.value, LEFT_RPWM.value = 0.0, 0.0
 
 # ============================================================
@@ -378,7 +380,7 @@ def get_average_distance():
     dist_right = abs(enc_right.output_revolutions()) * WHEEL_CIRCUMFERENCE
     
     # Return the average distance
-    return (dist_left + dist_right) / 2.0
+    return (dist_right + dist_right) / 2.0
 
 def drive_distance(d_cm, forward: bool):
     # Reset and update both encoders before starting
@@ -407,6 +409,14 @@ def drive_distance(d_cm, forward: bool):
         time.sleep(0.01)
         
     stop_drive()
+
+
+def encoder_test(left: bool, dist: float):
+    print(f"Testing {'left' if left else 'right'} encoder for {dist} cm...")
+    drive_distance(dist, forward=True)
+    time.sleep(1)
+    drive_distance(dist, forward=False)
+    print("Encoder test completed.")
 
 def turn_angle(theta_rad, left_turn: bool):
     print(theta_rad)
@@ -503,7 +513,7 @@ def bring_bottle_xz():
         else:   
             print("No bottle detected.")
 
-    turn_angle(alpha, alpha < 0)
+    # turn_angle(alpha, alpha < 0)
     print("Completed turn towards bottle.")
     time.sleep(2)
     drive_distance(math.hypot(found_bottle["Z"], found_bottle["X"]), True)
