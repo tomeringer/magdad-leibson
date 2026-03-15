@@ -469,7 +469,7 @@ def drive_arc(target_x, target_z):
     # 5. Calculate target distance for the center of the robot
     # Angle of the arc (theta) * Radius
     angle = math.atan2(target_z, R - abs(target_x))
-    total_arc_length = R * angle * 0.95
+    total_arc_length = R * angle
 
     RIGHT_RPWM.value, LEFT_RPWM.value = v_right * 1.08, v_left
     RIGHT_LPWM.value, LEFT_LPWM.value = 0.0, 0.0
