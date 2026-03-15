@@ -23,7 +23,7 @@ RED_LED_PIN = 26
 GREEN_LED_PIN = 16
 
 factory = PiGPIOFactory()
-    
+
 # ---- Stereo / YOLO config ----
 CALIBRATION_FILE_PATH = r"Autonomy/stereo_calibration.pkl"
 LEFT_CAM = "/dev/v4l/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.4:1.0-video-index0"
@@ -383,7 +383,7 @@ def drive_distance(d_cm, forward: bool):
     stop_drive()
 
 def turn_angle(theta_rad, left_turn: bool):
-    theta_rad = theta_rad - math.radians(5)
+    # theta_rad = theta_rad - math.radians(5)
     print(theta_rad)
     enc.zero()
     enc.update()
@@ -401,7 +401,7 @@ def turn_angle(theta_rad, left_turn: bool):
 
 def bring_bottle_xz():
     time.sleep(2)
-    z0 = 22
+    z0 = 21.0
     t0 = time.perf_counter()
     while True:
         found_bottle = detect_bottle_once()
