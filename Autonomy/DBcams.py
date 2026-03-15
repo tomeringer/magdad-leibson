@@ -11,7 +11,7 @@ cap_l = cv2.VideoCapture(0, cv2.CAP_V4L2)
 
 # Verify if cameras are successfully opened
 print(f"[DEBUG] Left camera opened (index 0): {cap_l.isOpened()}")
-print(f"[DEBUG] Right camera opened (index 2): {cap_r.isOpened()}")
+# print(f"[DEBUG] Right camera opened (index 2): {cap_r.isOpened()}")
 
 
 # Configure MJPG and resolution to save USB bandwidth
