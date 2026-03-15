@@ -491,25 +491,26 @@ def bring_bottle_xz():
     time.sleep(2)
     z0 = 21.0
     t0 = time.perf_counter()
+    found_bottle = {"found": False}
+
     while True:
         found_bottle = detect_bottle_once()
         now = time.perf_counter()
         if now - t0 > 10:
-            break
+            print("Timeout: No bottle found.")
+            return
         if found_bottle["found"]:
-            print(f"Bottle at X={found_bottle['X']:.2f}, Y={found_bottle['Y']:.2f}, Z={found_bottle['Z']:.2f}")
-            original_z = found_bottle['Z']
-            new_z = z0 + original_z
-            alpha = math.atan2(found_bottle['X'], new_z)
+            print(f"Targeting bottle at X={found_bottle['X']:.2f}, Z={found_bottle['Z']:.2f}")
             break
-        else:   
+        else:
             print("No bottle detected.")
+            time.sleep(0.1)
 
-    turn_angle(alpha, alpha < 0)
-    print("Completed turn towards bottle.")
-    time.sleep(2)
-    drive_distance(math.hypot(found_bottle["Z"], found_bottle["X"]), True)
-    print("Arrived at bottle location.")
+    # Use arc driving instead of turn-then-drive
+    # We pass X and Z directly to the arc function
+    drive_arc(found_bottle['X'], found_bottle['Z'])
+
+    print("Arrived at bottle location via arc.")
     time.sleep(1)
     servo_move_step(0)
 
