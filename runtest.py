@@ -86,7 +86,7 @@ LEFT_LPWM = PWMOutputDevice(21, frequency=1000, initial_value=0, pin_factory=fac
 def stop_drive():
     RIGHT_RPWM.value = RIGHT_LPWM.value = LEFT_RPWM.value = LEFT_LPWM.value = 0.0
 
-speed_diff = 1.085
+speed_diff = 1.082
 
 def drive_forward(speed: float = 0.3):
     RIGHT_RPWM.value, LEFT_RPWM.value = speed * speed_diff, speed
@@ -549,7 +549,7 @@ if __name__ == "__main__":
                 track_bottle_continuous()
             elif cmd == 'f':
                 drive_forward(0.3)
-                time.sleep(3)
+                time.sleep(4)
                 stop_drive()
             elif cmd == 'q':
                 break
