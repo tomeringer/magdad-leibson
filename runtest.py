@@ -457,7 +457,7 @@ def drive_arc(target_x, target_z):
 
     # 3. Calculate Speed Ratio
     # Faster speed / Slower speed = r_outer / r_inner
-    speed_outer = 0.4
+    speed_outer = 0.3
     speed_inner = speed_outer * (r_inner / r_outer)
 
     # 4. Determine which wheel is which
@@ -474,7 +474,7 @@ def drive_arc(target_x, target_z):
     total_arc_length = R * angle - 4.5
 
     #RIGHT_RPWM.value, LEFT_RPWM.value = v_right * speed_diff, v_left
-    RIGHT_RPWM.value, LEFT_RPWM.value = v_right * speed_diff, v_left
+    RIGHT_RPWM.value, LEFT_RPWM.value = v_right * 0.06, v_left
     RIGHT_LPWM.value, LEFT_LPWM.value = 0.0, 0.0
 
     # 6. Monitor distance
