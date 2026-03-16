@@ -405,7 +405,7 @@ def drive_distance(d_cm, forward: bool):
         # Calculate current average distance
         current_dist = get_average_distance()
         
-        print("Distance traveled: R=" + str(enc_right) + ", L=" + str(enc_left))
+        print("Distance traveled: R=" + str(abs(enc_right.output_revolutions())) + ", L=" + str(abs(enc_left.output_revolutions())))
         time.sleep(0.01)
         
     stop_drive()
@@ -547,7 +547,7 @@ if __name__ == "__main__":
             elif cmd == 'b':
                 track_bottle_continuous()
             elif cmd == 'f':
-                drive_distance(20, True)    
+                drive_distance(2000, True)    
             elif cmd == 'q':
                 break
                 
