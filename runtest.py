@@ -392,7 +392,7 @@ def drive_distance(d_cm, forward: bool):
     d_cm = d_cm - 1
     
     if forward:
-        drive_forward()
+        drive_forward(0.1)
     else:
         drive_reverse()
         
@@ -547,7 +547,7 @@ if __name__ == "__main__":
             elif cmd == 'b':
                 track_bottle_continuous()
             elif cmd == 'f':
-                drive_distance(0.1, 20)    
+                drive_distance(20, True)    
             elif cmd == 'q':
                 break
                 
