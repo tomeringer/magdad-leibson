@@ -59,7 +59,7 @@ ARC_SPEED_DIFF_FACTOR = 1.06  # Dedicated multiplier for arc turns due to variab
 DEFAULT_DRIVE_SPEED = 0.3
 DEFAULT_REVERSE_SPEED = 0.45
 DEFAULT_TURN_SPEED = 0.2
-ARC_MAX_OUTER_SPEED = 0.4  # The constant speed for the outer wheel during arc turns
+ARC_MAX_OUTER_SPEED = 0.3  # The constant speed for the outer wheel during arc turns
 
 # Motor/Servo step configurations
 SERVO_MOVE_STEP = 0.39
