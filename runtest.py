@@ -88,7 +88,7 @@ def stop_drive():
 
 speed_diff = 1
 
-def drive_forward(speed: float = 0.3):
+def     drive_forward(speed: float = 0.3):
     RIGHT_RPWM.value, LEFT_RPWM.value = speed * speed_diff, speed
     RIGHT_LPWM.value, LEFT_LPWM.value = 0.0, 0.0
 
@@ -392,7 +392,7 @@ def drive_distance(d_cm, forward: bool):
     d_cm = d_cm - 1
     
     if forward:
-        drive_forward(0.1)
+        drive_forward(0.3)
     else:
         drive_reverse()
         
