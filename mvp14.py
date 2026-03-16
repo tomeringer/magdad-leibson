@@ -44,9 +44,6 @@ SILENCE_STOP_SEC = 0.7
 PAYLOAD_BUFFER_SIZE = 1024
 
 # --- Hardware Pins (BCM) ---
-# LED Configuration (PNP BC327: HIGH = OFF, LOW = ON)
-RED_LED_PIN = 26    # Red: Obstacle (Ultrasonic) + Failure indicator
-GREEN_LED_PIN = 16  # Green: Object detection (Image processing) success
 
 SERVO_PIN = 12
 
@@ -114,7 +111,6 @@ YOLO_CONF_THRESHOLD = 0.50
 MATCH_Y_TOLERANCE = 10
 
 AUTONOMY_SEARCH_TIMEOUT_SEC = 5.0 # Max time to loop detection attempts
-LED_FAIL_TIMEOUT_SEC = 5.0        # How long to flash red LEDs upon failure
 
 # ============================================================
 # INITIALIZATION (GPIO & FACTORIES)
@@ -130,10 +126,6 @@ GPIO.setup(US1_TRIG, GPIO.OUT)
 GPIO.setup(US1_ECHO, GPIO.IN)
 GPIO.setup(US2_TRIG, GPIO.OUT)
 GPIO.setup(US2_ECHO, GPIO.IN)
-
-# Initialize LEDs (PNP: HIGH = OFF)
-GPIO.setup(RED_LED_PIN, GPIO.OUT, initial=GPIO.HIGH)
-GPIO.setup(GREEN_LED_PIN, GPIO.OUT, initial=GPIO.HIGH)
 
 GPIO.output(US1_TRIG, GPIO.LOW)
 GPIO.output(US2_TRIG, GPIO.LOW)
@@ -154,9 +146,6 @@ _prev_prev_drive_req = "STOP"
 # Ultrasonic override logic
 _ignore_ultra_active = False
 _ignore_ultra_cmd = None
-
-# Timer for red LED indicator in case of detection failure
-_red_led_fail_until = 0.0
 
 # Ultrasonic states
 _last_ultra_t = 0.0
@@ -781,7 +770,7 @@ def handle_payload(payload: int) -> None:
     _prev_drive_req = drive_req
 
 def run_glove_loop() -> None:
-    global _arm_dir, _last_pkt_t, sock, last_rx, _red_led_fail_until
+    global _arm_dir, _last_pkt_t, sock, last_rx
     
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind((UDP_LISTEN_IP, UDP_PORT))
@@ -795,14 +784,6 @@ def run_glove_loop() -> None:
 
         now = time.time()
         too_close = obstacle_too_close()
-        
-        # Red LED ON if obstacle detected OR failure timer is active
-        fail_active = (now < _red_led_fail_until)
-
-        if too_close or fail_active:
-            GPIO.output(RED_LED_PIN, GPIO.LOW)   # ON (PNP)
-        else:
-            GPIO.output(RED_LED_PIN, GPIO.HIGH)  # OFF
 
         if _arm_dir != 0: 
             run_arm(_arm_dir == 1)
@@ -828,8 +809,6 @@ if __name__ == "__main__":
         pass
     finally:
         stop_drive()
-        GPIO.output(RED_LED_PIN, GPIO.HIGH)
-        GPIO.output(GREEN_LED_PIN, GPIO.HIGH)
         shutdown_vision()
         _stepper.close()
         GPIO.cleanup()
