@@ -831,5 +831,6 @@ if __name__ == "__main__":
         GPIO.output(RED_LED_PIN, GPIO.HIGH)
         GPIO.output(GREEN_LED_PIN, GPIO.HIGH)
         shutdown_vision()
+        _stepper.close()
         GPIO.cleanup()
         print("\n[OFF] System Stopped.")
