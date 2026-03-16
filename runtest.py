@@ -446,12 +446,10 @@ def turn_angle(theta_rad, left_turn: bool):
 
 def drive_arc(target_x, target_z):
     L = 36.0  # Track width (distance between wheels)
-    z0 = 21.0
 
     # 1. Calculate the radius of the arc
     # R is the distance from the Integrated Center of Rotation (ICR) to robot center
-    x0 = (target_x ** 2 + target_z ** 2 + 2*target_z*z0) / (2 * target_x)
-    R = abs(x0)
+    R = (target_x ** 2 + target_z ** 2) / (2 * abs(target_x))
 
     # 2. Define wheel radii
     r_inner = R - (L / 2)
@@ -472,10 +470,10 @@ def drive_arc(target_x, target_z):
 
     # 5. Calculate target distance for the center of the robot
     # Angle of the arc (theta) * Radius
-    angle = math.atan2(target_z + z0, target_x - x0) - math.atan2(z0, -x0)
+    angle = math.atan2(target_z, R - abs(target_x))
     total_arc_length = R * angle - 4.5
 
-    RIGHT_RPWM.value, LEFT_RPWM.value = v_right * speed_diff, v_left
+    RIGHT_RPWM.value, LEFT_RPWM.value = v_right * 1.08, v_left
     RIGHT_LPWM.value, LEFT_LPWM.value = 0.0, 0.0
 
     # 6. Monitor distance
