@@ -547,6 +547,8 @@ def handle_payload(payload: int) -> None:
 
     # ---- Autonomy Trigger ----
     if (f0 == 1 and f1 == 1 and f2 == 1 and f3 == 1) and not (_prev_f0 == 1 and _prev_f1 == 1 and _prev_f2 == 1 and _prev_f3 == 1):
+        stop_drive()
+        stop_arm()
         bring_bottle_xz()
         # Update history immediately so edge detection doesn't trigger unexpectedly
         _prev_f0, _prev_f1, _prev_f2, _prev_f3 = f0, f1, f2, f3
