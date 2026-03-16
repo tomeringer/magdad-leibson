@@ -29,7 +29,6 @@ from ultralytics import YOLO
 # ============================================================
 
 # --- System & Operation Mode ---
-MODE = "GLOVE"
 DEBUG_MODE = True
 CONTROL_PERIOD_SEC = 0.01
 BOTTLE_SEARCH_TIMEOUT_SEC = 10.0  # Maximum time to look for the bottle before aborting
@@ -74,16 +73,12 @@ SPEED_OF_SOUND_DIVISOR = 17150.0  # Constant used to convert echo time to CM
 # --- Robot Kinematics & Mechanics ---
 WHEEL_CIRCUMFERENCE_CM = math.pi * 7.2
 TRACK_WIDTH_CM = 39.0          # Distance between wheels for this specific configuration
-TURN_ANGLE_OFFSET_RAD = math.radians(5) # Angle reduction offset for turns
-DISTANCE_UNDERSHOOT_CM = 1.0   # Stop distance slightly before target to account for inertia
-ARM_Z_OFFSET_CM = 22.0         # Physical Z-axis offset to target for the arm's reach
 
 SPEED_DIFF_FACTOR = 1.04       # Multiplier for straight-line driving
 ARC_SPEED_DIFF_FACTOR = 1.06   # Dedicated multiplier for arc turns
 DEFAULT_TURN_SPEED = 0.2
 DEFAULT_DRIVE_SPEED = 0.3
 DEFAULT_REVERSE_SPEED = 0.3
-AUTONOMY_TURN_SPEED = 0.4      # Specific turning speed used during visual autonomy
 ARC_MAX_OUTER_SPEED = 0.3  # The constant speed for the outer wheel during arc turns
 
 SERVO_MOVE_STEP = 0.39
