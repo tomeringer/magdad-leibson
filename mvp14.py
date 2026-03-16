@@ -31,7 +31,7 @@ from ultralytics import YOLO
 # --- System & Operation Mode ---
 DEBUG_MODE = True
 CONTROL_PERIOD_SEC = 0.01
-BOTTLE_SEARCH_TIMEOUT_SEC = 10.0  # Maximum time to look for the bottle before aborting
+BOTTLE_SEARCH_TIMEOUT_SEC = 5.0  # Maximum time to look for the bottle before aborting
 
 # --- UDP Network Config ---
 UDP_LISTEN_IP = "0.0.0.0"
