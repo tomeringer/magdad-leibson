@@ -1,125 +1,177 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-import os
+"""
+Robot Glove Controller (UDP) & Autonomy Mode
+Handles UDP Glove commands, Ultrasonic Collision Avoidance, and YOLO Vision.
+"""
 
+import os
+# Setting environment variables must happen before pigpio is imported
 os.environ['PIGPIO_ADDR'] = 'localhost'
 
 import time
 import socket
-import pigpio
-import RPi.GPIO as GPIO
-from typing import Optional
-from gpiozero import PWMOutputDevice, Servo
-from gpiozero.pins.pigpio import PiGPIOFactory
-
 import math
 import pickle
+from typing import Optional
 
 import cv2
 import numpy as np
+import pigpio
+import RPi.GPIO as GPIO
+from gpiozero import PWMOutputDevice, Servo
+from gpiozero.pins.pigpio import PiGPIOFactory
 from ultralytics import YOLO
 
 # ============================================================
-# CONFIGURATION
+# CONSTANTS & CONFIGURATION
 # ============================================================
+
+# --- System & Operation Mode ---
 MODE = "GLOVE"
+CONTROL_PERIOD_SEC = 0.01
+
+# --- UDP Network Config ---
 UDP_LISTEN_IP = "0.0.0.0"
 UDP_PORT = 4210
 FRAME_START = 0xAA
 FRAME_END = 0x55
-
-CONTROL_PERIOD_SEC = 0.01
+UDP_TIMEOUT_SEC = 0.02
 SILENCE_STOP_SEC = 0.7
+PAYLOAD_BUFFER_SIZE = 1024
 
-# --- ×”×’×“×¨×•×ª LED (PNP BC327) ---
-RED_LED_PIN = 26  # ××“×•×ž×™× - ×ž×›×©×•×œ (××•×œ×˜×¨×¡×•× ×™) + ×—×™×•×•×™ ×›×©×œ
-GREEN_LED_PIN = 16  # ×™×¨×•×§×™× - ×–×™×”×•×™ ×—×¤×¥ (×¢×™×‘×•×“ ×ª×ž×•× ×”)
-# ------------------------------
+# --- Hardware Pins (BCM) ---
+# LED Configuration (PNP BC327: HIGH = OFF, LOW = ON)
+RED_LED_PIN = 26    # Red: Obstacle (Ultrasonic) + Failure indicator
+GREEN_LED_PIN = 16  # Green: Object detection (Image processing) success
 
-factory = PiGPIOFactory()
+SERVO_PIN = 12
 
-# ---- Stereo / YOLO config ----
-CALIBRATION_FILE_PATH = r"Autonomy/stereo_calibration.pkl"
-LEFT_CAM = "/dev/v4l/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.4:1.0-video-index0"
-RIGHT_CAM = "/dev/v4l/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0"
-
-W = 640
-H = 480
-CAM_FPS = 15
-DEFAULT_IMG_SIZE = (W, H)
-
-BOTTLE_CLASS_ID = 39
-YOLO_CONF = 0.50
-MATCH_Y_TOL = 10
-
-# ---- Stepper config ----
-STEPPER_CHUNK = 4
-STEPPER_STEP_DELAY_SEC = 0.0015
-STEPPER_TICK_SEC = 0.05
-_last_stepper_cmd_t = 0.0
-STEP_CMD_STALE_SEC = 0.12
-_arm_dir = 0
-_last_pkt_t = 0.0
-sock = None
-last_rx = 0.0
-
-# ============================================================
-# GLOBAL STATE
-# ============================================================
-prev_f0 = prev_f1 = prev_f2 = prev_f3 = 0
-_prev_drive_req = "STOP"
-_prev_prev_drive_req = "STOP"
-_ignore_ultra_active = False
-_ignore_ultra_cmd = None
-
-# ×˜×™×™×ž×¨ ×¢×‘×•×¨ ×—×™×•×•×™ ×”××“×•× ×‘×ž×§×¨×” ×©×œ ×›×©×œ ×‘×–×™×”×•×™
-_red_led_fail_until = 0.0
-
-# ============================================================
-# ULTRASONIC SENSORS & GPIO SETUP
-# ============================================================
 US1_TRIG, US1_ECHO = 5, 6
 US2_TRIG, US2_ECHO = 13, 19
+
+RIGHT_RPWM_PIN = 2
+RIGHT_LPWM_PIN = 3
+LEFT_RPWM_PIN = 20
+LEFT_LPWM_PIN = 21
+
+ARM_RPWM_PIN = 27
+ARM_LPWM_PIN = 22
+
+ENC_LEFT_A = 24
+ENC_LEFT_B = 25
+
+# --- Ultrasonic Settings ---
+ULTRA_STOP_CM = 40.0
+US_TIMEOUT_SEC = 0.03
+ULTRA_MEASURE_PERIOD_SEC = 0.10
+SPEED_OF_SOUND_DIVISOR = 17150.0  # Constant used to convert echo time to CM
+
+# --- Robot Kinematics & Mechanics ---
+WHEEL_CIRCUMFERENCE_CM = math.pi * 7.2
+TRACK_WIDTH_CM = 39.0          # Distance between wheels for this specific configuration
+TURN_ANGLE_OFFSET_RAD = math.radians(5) # Angle reduction offset for turns
+DISTANCE_UNDERSHOOT_CM = 1.0   # Stop distance slightly before target to account for inertia
+ARM_Z_OFFSET_CM = 22.0         # Physical Z-axis offset to target for the arm's reach
+
+SPEED_DIFF_FACTOR = 1.04       # Multiplier for straight-line driving
+ARC_SPEED_DIFF_FACTOR = 1.06   # Dedicated multiplier for arc turns
+DEFAULT_TURN_SPEED = 0.2
+DEFAULT_DRIVE_SPEED = 0.3
+DEFAULT_REVERSE_SPEED = 0.3
+AUTONOMY_TURN_SPEED = 0.4      # Specific turning speed used during visual autonomy
+
+SERVO_MOVE_STEP = 0.39
+
+# --- Vision & Camera Settings ---
+CALIBRATION_FILE_PATH = r"Autonomy/stereo_calibration.pkl"
+LEFT_CAM_PATH = "/dev/v4l/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.4:1.0-video-index0"
+RIGHT_CAM_PATH = "/dev/v4l/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0"
+
+CAM_WIDTH = 640
+CAM_HEIGHT = 480
+CAM_FPS = 15
+DEFAULT_IMG_SIZE = (CAM_WIDTH, CAM_HEIGHT)
+
+BOTTLE_CLASS_ID = 39
+YOLO_CONF_THRESHOLD = 0.50
+MATCH_Y_TOLERANCE = 10
+
+AUTONOMY_SEARCH_TIMEOUT_SEC = 5.0 # Max time to loop detection attempts
+LED_FAIL_TIMEOUT_SEC = 5.0        # How long to flash red LEDs upon failure
+
+# ============================================================
+# INITIALIZATION (GPIO & FACTORIES)
+# ============================================================
+factory = PiGPIOFactory()
+pi_enc = pigpio.pi()
 
 GPIO.setmode(GPIO.BCM)
 GPIO.setwarnings(False)
 
+# Setup Ultrasonic Pins
 GPIO.setup(US1_TRIG, GPIO.OUT)
 GPIO.setup(US1_ECHO, GPIO.IN)
 GPIO.setup(US2_TRIG, GPIO.OUT)
 GPIO.setup(US2_ECHO, GPIO.IN)
 
-# ××ª×—×•×œ ×œ×“×™× (PNP: HIGH = OFF)
+# Initialize LEDs (PNP: HIGH = OFF)
 GPIO.setup(RED_LED_PIN, GPIO.OUT, initial=GPIO.HIGH)
 GPIO.setup(GREEN_LED_PIN, GPIO.OUT, initial=GPIO.HIGH)
 
 GPIO.output(US1_TRIG, GPIO.LOW)
 GPIO.output(US2_TRIG, GPIO.LOW)
 
-ULTRA_STOP_CM = 40.0
-US_TIMEOUT_SEC = 0.03
-ULTRA_MEASURE_PERIOD_SEC = 0.10
+# ============================================================
+# GLOBAL STATE
+# ============================================================
+# Glove history
+_prev_f0 = _prev_f1 = _prev_f2 = _prev_f3 = 0
+_arm_dir = 0
+_last_pkt_t = 0.0
+last_rx = 0.0
 
+# Drive state history
+_prev_drive_req = "STOP"
+_prev_prev_drive_req = "STOP"
+
+# Ultrasonic override logic
+_ignore_ultra_active = False
+_ignore_ultra_cmd = None
+
+# Timer for red LED indicator in case of detection failure
+_red_led_fail_until = 0.0
+
+# Ultrasonic states
 _last_ultra_t = 0.0
 _last_distances = [None, None]
 
+# Socket
+sock = None
 
-def _measure_distance_cm(trig, echo) -> Optional[float]:
+# ============================================================
+# ULTRASONIC SENSORS
+# ============================================================
+def _measure_distance_cm(trig: int, echo: int) -> Optional[float]:
     GPIO.output(trig, True)
     time.sleep(0.00001)
     GPIO.output(trig, False)
+    
     t0 = time.time()
     while GPIO.input(echo) == 0:
-        if time.time() - t0 > US_TIMEOUT_SEC: return None
+        if time.time() - t0 > US_TIMEOUT_SEC: 
+            return None
+            
     ps = time.time()
     while GPIO.input(echo) == 1:
-        if time.time() - ps > US_TIMEOUT_SEC: return None
+        if time.time() - ps > US_TIMEOUT_SEC: 
+            return None
+            
     pe = time.time()
-    return (pe - ps) * 17150.0
+    return (pe - ps) * SPEED_OF_SOUND_DIVISOR
 
-
-def ultrasonic_tick():
+def ultrasonic_tick() -> None:
     global _last_ultra_t, _last_distances
     now = time.time()
     if now - _last_ultra_t >= ULTRA_MEASURE_PERIOD_SEC:
@@ -129,18 +181,15 @@ def ultrasonic_tick():
             _measure_distance_cm(US2_TRIG, US2_ECHO),
         ]
 
-
 def obstacle_too_close() -> bool:
     for d in _last_distances:
         if d is not None and d < ULTRA_STOP_CM:
             return True
     return False
 
-
 # ============================================================
 # SERVO & MOTORS
 # ============================================================
-SERVO_PIN = 12
 servo = Servo(
     SERVO_PIN,
     initial_value=None,
@@ -149,41 +198,35 @@ servo = Servo(
     pin_factory=factory
 )
 
-MOVE_STEP = 0.39
-current_pos = 0.0
-servo_is_open = True
+_current_servo_pos = 0.0
+_servo_is_open = True
 
-
-def servo_move_step(direction):
-    global current_pos, servo_is_open
+def servo_move_step(direction: int) -> None:
+    global _current_servo_pos, _servo_is_open
     want_close = (direction == 1)
-    if want_close and (not servo_is_open): return
-    if (not want_close) and servo_is_open: return
+    
+    if want_close and not _servo_is_open: 
+        return
+    if not want_close and _servo_is_open: 
+        return
 
     if want_close:
-        new_val = current_pos + MOVE_STEP
+        new_val = _current_servo_pos + SERVO_MOVE_STEP
     else:
-        new_val = current_pos - MOVE_STEP
+        new_val = _current_servo_pos - SERVO_MOVE_STEP
 
     new_val = max(-1.0, min(1.0, new_val))
-    current_pos = new_val
-    servo.value = current_pos
-    servo_is_open = (not want_close)
+    _current_servo_pos = new_val
+    servo.value = _current_servo_pos
+    _servo_is_open = not want_close
 
+RIGHT_RPWM = PWMOutputDevice(RIGHT_RPWM_PIN, frequency=1000, initial_value=0, pin_factory=factory)
+RIGHT_LPWM = PWMOutputDevice(RIGHT_LPWM_PIN, frequency=1000, initial_value=0, pin_factory=factory)
+LEFT_RPWM = PWMOutputDevice(LEFT_RPWM_PIN, frequency=1000, initial_value=0, pin_factory=factory)
+LEFT_LPWM = PWMOutputDevice(LEFT_LPWM_PIN, frequency=1000, initial_value=0, pin_factory=factory)
 
-RIGHT_RPWM = PWMOutputDevice(2, frequency=1000, initial_value=0, pin_factory=factory)
-RIGHT_LPWM = PWMOutputDevice(3, frequency=1000, initial_value=0, pin_factory=factory)
-LEFT_RPWM = PWMOutputDevice(20, frequency=1000, initial_value=0, pin_factory=factory)
-LEFT_LPWM = PWMOutputDevice(21, frequency=1000, initial_value=0, pin_factory=factory)
-
-ARM_RPWM = PWMOutputDevice(27, frequency=1000, initial_value=0, pin_factory=factory)
-ARM_LPWM = PWMOutputDevice(22, frequency=1000, initial_value=0, pin_factory=factory)
-
-SPEED_DIFF_FACTOR = 1.04      # Multiplier for straight-line driving
-ARC_SPEED_DIFF_FACTOR = 1.06  # Dedicated multiplier for arc turns due to variable
-DEFAULT_TURN_SPEED = 0.2
-DEFAULT_DRIVE_SPEED = 0.3
-DEFAULT_REVERSE_SPEED = 0.3
+ARM_RPWM = PWMOutputDevice(ARM_RPWM_PIN, frequency=1000, initial_value=0, pin_factory=factory)
+ARM_LPWM = PWMOutputDevice(ARM_LPWM_PIN, frequency=1000, initial_value=0, pin_factory=factory)
 
 def stop_drive() -> None:
     RIGHT_RPWM.value = RIGHT_LPWM.value = LEFT_RPWM.value = LEFT_LPWM.value = 0.0
@@ -204,237 +247,230 @@ def turn_left(speed: float = DEFAULT_TURN_SPEED) -> None:
     RIGHT_RPWM.value, LEFT_LPWM.value = speed * SPEED_DIFF_FACTOR, speed
     RIGHT_LPWM.value, LEFT_RPWM.value = 0.0, 0.0
 
-
-# ============================================================
-# ENCODER & STEPPER
-# ============================================================
-pi_enc = pigpio.pi()
-
-
-class YellowJacketEncoder:
-    _TRANS = {0b0001: +1, 0b0010: -1, 0b0100: -1, 0b0111: +1, 0b1000: +1, 0b1011: -1, 0b1101: -1, 0b1110: +1}
-
-    def __init__(self, pi, gpio_a, gpio_b):
-        self.pi, self.gpio_a, self.gpio_b = pi, gpio_a, gpio_b
-        self.ppr_output = 384.5 * (100 / 106)
-        self.counts_per_rev_output = self.ppr_output
-        self.counts = 0
-        self._last_state = (pi.read(gpio_a) << 1) | pi.read(gpio_b)
-        self.pi.set_mode(gpio_a, pigpio.INPUT)
-        self.pi.set_pull_up_down(gpio_a, pigpio.PUD_UP)
-        self.pi.set_mode(gpio_b, pigpio.INPUT)
-        self.pi.set_pull_up_down(gpio_b, pigpio.PUD_UP)
-        self._cba = pi.callback(gpio_a, pigpio.EITHER_EDGE, self._cb)
-        self._cbb = pi.callback(gpio_b, pigpio.EITHER_EDGE, self._cb)
-        self._t_last, self._c_last, self._output_rpm = time.time(), 0, 0.0
-
-    def _cb(self, gpio, level, tick):
-        new_state = (self.pi.read(self.gpio_a) << 1) | self.pi.read(self.gpio_b)
-        self.counts += self._TRANS.get((self._last_state << 2) | new_state, 0)
-        self._last_state = new_state
-
-    def update(self, window_s=0.2):
-        dt = time.time() - self._t_last
-        if dt < window_s: return
-        self._output_rpm = 60.0 * ((self.counts - self._c_last) / self.counts_per_rev_output) / dt
-        self._t_last, self._c_last = time.time(), self.counts
-
-    def output_revolutions(self): return self.counts / self.counts_per_rev_output
-
-    def zero(self): self.counts = self._c_last = 0
-
-
-enc = YellowJacketEncoder(pi_enc, 24, 25)
-
-
-def run_arm(forward: bool):
+def run_arm(forward: bool) -> None:
     if forward:
         ARM_LPWM.value, ARM_RPWM.value = 1, 0
     else:
         ARM_LPWM.value, ARM_RPWM.value = 0, 1
 
-def stop_arm():
+def stop_arm() -> None:
     ARM_RPWM.value, ARM_LPWM.value = 0, 0
 
+# ============================================================
+# ENCODER
+# ============================================================
+class YellowJacketEncoder:
+    _TRANS = {0b0001: +1, 0b0010: -1, 0b0100: -1, 0b0111: +1, 
+              0b1000: +1, 0b1011: -1, 0b1101: -1, 0b1110: +1}
+
+    def __init__(self, pi: pigpio.pi, gpio_a: int, gpio_b: int):
+        self.pi = pi
+        self.gpio_a = gpio_a
+        self.gpio_b = gpio_b
+        self.ppr_output = 384.5 * (100 / 106)
+        self.counts_per_rev_output = self.ppr_output
+        self.counts = 0
+        self._last_state = (pi.read(gpio_a) << 1) | pi.read(gpio_b)
+        
+        self.pi.set_mode(gpio_a, pigpio.INPUT)
+        self.pi.set_pull_up_down(gpio_a, pigpio.PUD_UP)
+        self.pi.set_mode(gpio_b, pigpio.INPUT)
+        self.pi.set_pull_up_down(gpio_b, pigpio.PUD_UP)
+        
+        self._cba = pi.callback(gpio_a, pigpio.EITHER_EDGE, self._cb)
+        self._cbb = pi.callback(gpio_b, pigpio.EITHER_EDGE, self._cb)
+        self._t_last = time.time()
+        self._c_last = 0
+        self._output_rpm = 0.0
+
+    def _cb(self, gpio, level, tick) -> None:
+        new_state = (self.pi.read(self.gpio_a) << 1) | self.pi.read(self.gpio_b)
+        self.counts += self._TRANS.get((self._last_state << 2) | new_state, 0)
+        self._last_state = new_state
+
+    def update(self, window_s: float = 0.2) -> None:
+        dt = time.time() - self._t_last
+        if dt < window_s: 
+            return
+        self._output_rpm = 60.0 * ((self.counts - self._c_last) / self.counts_per_rev_output) / dt
+        self._t_last, self._c_last = time.time(), self.counts
+
+    def output_revolutions(self) -> float: 
+        return self.counts / self.counts_per_rev_output
+
+    def zero(self) -> None: 
+        self.counts = self._c_last = 0
+
+# NOTE: This script utilizes only the left encoder
+enc = YellowJacketEncoder(pi_enc, ENC_LEFT_A, ENC_LEFT_B)
 
 # ============================================================
 # VISION
 # ============================================================
 _vision_ready = False
-_model = _cap_l = _cap_r = _maps_l = _maps_r = _Q = None
+_model = None
+_cap_l = None
+_cap_r = None
+_maps_l = None
+_maps_r = None
+_Q = None
 
-
-def init_vision():
+def init_vision() -> None:
     global _vision_ready, _model, _cap_l, _cap_r, _maps_l, _maps_r, _Q
-    if _vision_ready: return
+    if _vision_ready: 
+        return
+        
     _model = YOLO('Autonomy/yolov8n_ncnn_model', task='detect')
-    _cap_l = cv2.VideoCapture(LEFT_CAM, cv2.CAP_V4L2)
-    _cap_r = cv2.VideoCapture(RIGHT_CAM, cv2.CAP_V4L2)
-    with open(CALIBRATION_FILE_PATH, 'rb') as f: data = pickle.load(f)
+    _cap_l = cv2.VideoCapture(LEFT_CAM_PATH, cv2.CAP_V4L2)
+    _cap_r = cv2.VideoCapture(RIGHT_CAM_PATH, cv2.CAP_V4L2)
+    
+    with open(CALIBRATION_FILE_PATH, 'rb') as f: 
+        data = pickle.load(f)
+        
     _Q = data['Q']
-    R1, R2, P1, P2, _, _, _ = cv2.stereoRectify(data['cameraMatrix1'], data['distCoeffs1'], data['cameraMatrix2'],
-                                                data['distCoeffs2'], (W, H), data['R'], data['T'], alpha=-1)
-    _maps_l = cv2.initUndistortRectifyMap(data['cameraMatrix1'], data['distCoeffs1'], R1, P1, (W, H), cv2.CV_32FC1)
-    _maps_r = cv2.initUndistortRectifyMap(data['cameraMatrix2'], data['distCoeffs2'], R2, P2, (W, H), cv2.CV_32FC1)
+    R1, R2, P1, P2, _, _, _ = cv2.stereoRectify(
+        data['cameraMatrix1'], data['distCoeffs1'], 
+        data['cameraMatrix2'], data['distCoeffs2'], 
+        DEFAULT_IMG_SIZE, data['R'], data['T'], alpha=-1
+    )
+    
+    _maps_l = cv2.initUndistortRectifyMap(data['cameraMatrix1'], data['distCoeffs1'], R1, P1, DEFAULT_IMG_SIZE, cv2.CV_32FC1)
+    _maps_r = cv2.initUndistortRectifyMap(data['cameraMatrix2'], data['distCoeffs2'], R2, P2, DEFAULT_IMG_SIZE, cv2.CV_32FC1)
     _vision_ready = True
 
-
-def detect_bottle_once():
+def detect_bottle_once() -> dict:
     global _model, _cap_l, _cap_r, _maps_l, _maps_r
-    for _ in range(5): _cap_l.grab(); _cap_r.grab()
-    _, fl = _cap_l.retrieve();
+    
+    for _ in range(5): 
+        _cap_l.grab()
+        _cap_r.grab()
+        
+    _, fl = _cap_l.retrieve()
     _, fr = _cap_r.retrieve()
     f_rect = cv2.remap(fl, _maps_l[0], _maps_l[1], cv2.INTER_LINEAR)
-    res = _model.predict(f_rect, conf=YOLO_CONF, classes=[BOTTLE_CLASS_ID], verbose=False)
+    res = _model.predict(f_rect, conf=YOLO_CONF_THRESHOLD, classes=[BOTTLE_CLASS_ID], verbose=False)
+    
     X = Z = None
     if res and len(res[0].boxes) > 0:
-        X, Y, Z = 0, 0, 100  # Placeholder ×œ×¢×¨×›×™ ×¢×•×ž×§ ××ž×™×ª×™×™×
+        # Placeholder for real depth values as originally written
+        X, Y, Z = 0, 0, 100  
+        
     return {"found": X is not None, "X": X, "Z": Z}
-
 
 # ============================================================
 # MOTION & AUTONOMY
 # ============================================================
-def drive_distance(d_cm, forward: bool):
-    enc.zero();
+def drive_distance(d_cm: float, forward: bool) -> None:
+    enc.zero()
     enc.update()
+    
     if forward:
         drive_forward()
     else:
         drive_reverse()
-    while abs(enc.output_revolutions()) * (math.pi * 7.2) < (d_cm - 1):
-        time.sleep(0.01);
+        
+    while abs(enc.output_revolutions()) * WHEEL_CIRCUMFERENCE_CM < (d_cm - DISTANCE_UNDERSHOOT_CM):
+        time.sleep(0.01)
         enc.update()
+        
     stop_drive()
 
-
-def turn_angle(theta_rad, left_turn: bool):
-    enc.zero();
+def turn_angle(theta_rad: float, left_turn: bool) -> None:
+    enc.zero()
     enc.update()
-    seg = (39.0 / 2.0) * abs(theta_rad - math.radians(5))
+    
+    segment_length = (TRACK_WIDTH_CM / 2.0) * abs(theta_rad - TURN_ANGLE_OFFSET_RAD)
+    
     if left_turn:
-        turn_left(0.4)
+        turn_left(AUTONOMY_TURN_SPEED)
     else:
-        turn_right(0.4)
-    while abs(enc.output_revolutions()) * (math.pi * 7.2) < seg:
-        time.sleep(0.01);
+        turn_right(AUTONOMY_TURN_SPEED)
+        
+    while abs(enc.output_revolutions()) * WHEEL_CIRCUMFERENCE_CM < segment_length:
+        time.sleep(0.01)
         enc.update()
+        
     stop_drive()
 
-
-def bring_bottle_xz():
+def bring_bottle_xz() -> None:
     global _red_led_fail_until
     print("[AUTO] Starting detection loop...")
 
-    # ×•×™×“×•× ×¦×‘×ª ×¤×ª×•×—×” ×œ×¤× ×™ ×ª×—×™×œ×ª ×”×ª× ×•×¢×”
+    # Ensure gripper is open before moving
     servo_move_step(0)
     time.sleep(1)
 
     start_time = time.time()
     found_bottle = {"found": False}
 
-    # ×œ×•×œ××ª × ×™×¡×™×•× ×•×ª ×–×™×”×•×™ ×œ×ž×©×š 5 ×©× ×™×•×ª ×œ×ž×–×¢×•×¨ ×©×’×™××•×ª ×’×™×œ×•×™ (BER) [cite: 13, 42]
-    while (time.time() - start_time) < 5.0:
+    # Detection attempt loop to minimize false negatives
+    while (time.time() - start_time) < AUTONOMY_SEARCH_TIMEOUT_SEC:
         found_bottle = detect_bottle_once()
         if found_bottle["found"]:
             break
         time.sleep(0.1)
 
     if found_bottle["found"]:
-        # ×”×¦×œ×—×”: ×”×“×œ×§×ª ×œ×“×™× ×™×¨×•×§×™×
+        # Success: Turn on green LEDs
         GPIO.output(GREEN_LED_PIN, GPIO.LOW)
         time.sleep(1)
 
-        # ×›×™×‘×•×™ ×œ×“×™× ×™×¨×•×§×™× ×¨×’×¢ ×œ×¤× ×™ ×ª×—×™×œ×ª ×”× ×¡×™×¢×”
+        # Turn off green LEDs just before driving
         GPIO.output(GREEN_LED_PIN, GPIO.HIGH)
 
-        # ×¨×¦×£ ×ª× ×•×¢×” ×•×ª×¤×™×¡×”
-        alpha = math.atan2(found_bottle['X'], 22 + found_bottle['Z'])
+        # Movement and grab sequence
+        alpha = math.atan2(found_bottle['X'], ARM_Z_OFFSET_CM + found_bottle['Z'])
         turn_angle(alpha, alpha < 0)
         drive_distance(math.hypot(found_bottle["Z"], found_bottle["X"]), True)
 
         time.sleep(1)
-        servo_move_step(1)  # ×¡×’×™×¨×”
+        servo_move_step(1)  # Close gripper
         time.sleep(1)
 
-        # ×”×¨×ž×ª ×–×¨×•×¢ 30 ×ž×¢×œ×•×ª (170 ×¦×¢×“×™×)
+        # Raise arm 30 degrees (170 steps placeholder)
         # _stepper.step_chunk(170, direction=1, delay_sec=STEPPER_STEP_DELAY_SEC)
         time.sleep(0.5)
 
         drive_distance(math.hypot(found_bottle["Z"], found_bottle["X"]), False)
 
-        # ×”×•×¨×“×ª ×–×¨×•×¢ ×—×–×¨×”
+        # Lower arm back
         # _stepper.step_chunk(170, direction=-1, delay_sec=STEPPER_STEP_DELAY_SEC)
         time.sleep(0.5)
 
-        servo_move_step(0)  # ×©×—×¨×•×¨
+        servo_move_step(0)  # Release
         time.sleep(1)
     else:
-        # ×›×©×œ: ×”×’×“×¨×ª ×˜×™×™×ž×¨ ×œ×œ×“×™× ××“×•×ž×™× ×œ×ž×©×š 5 ×©× ×™×•×ª
+        # Failure: Set timer for red LEDs
         print("[AUTO] Timeout: Bottle not found.")
-        _red_led_fail_until = time.time() + 5.0
-
+        _red_led_fail_until = time.time() + LED_FAIL_TIMEOUT_SEC
 
 # ============================================================
-# MAIN LOOP
+# MAIN GLOVE LOOP
 # ============================================================
-def run_glove_loop():
-    global _arm_dir, _last_pkt_t, sock, last_rx, _red_led_fail_until
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.bind((UDP_LISTEN_IP, UDP_PORT))
-    sock.settimeout(0.02)
-    last_rx = _last_pkt_t = time.time()
-    print(f"debug: Listening for UDP packets on {UDP_LISTEN_IP}:{UDP_PORT}...")
-    while True:
-        ultrasonic_tick()
-
-        now = time.time()
-        too_close = obstacle_too_close()
-        # ×—×™×•×•×™ ××“×•× ×× ×™×© ×ž×›×©×•×œ ××• ×× ×™×© ×›×©×œ ×–×™×”×•×™ ×‘×˜×™×™×ž×¨
-        fail_active = (now < _red_led_fail_until)
-
-        if too_close or fail_active:
-            GPIO.output(RED_LED_PIN, GPIO.LOW)  # ×“×•×œ×§ (PNP)
-        else:
-            GPIO.output(RED_LED_PIN, GPIO.HIGH)  # ×›×‘×•×™
-
-        if _arm_dir != 0: run_arm(_arm_dir == 1)
-        else: stop_arm()
-
-        try:
-            data, _ = sock.recvfrom(1024)
-            if len(data) >= 3 and data[0] == FRAME_START and data[2] == FRAME_END:
-                handle_payload(data[1])
-                last_rx = time.time()
-        except socket.timeout:
-            if time.time() - last_rx > SILENCE_STOP_SEC: stop_drive()
-
-        time.sleep(CONTROL_PERIOD_SEC)
-
-
-def handle_payload(payload: int):
-    global prev_f0, prev_f1, prev_f2, prev_f3, _arm_dir, _last_pkt_t
+def handle_payload(payload: int) -> None:
+    global _prev_f0, _prev_f1, _prev_f2, _prev_f3, _arm_dir, _last_pkt_t
     global _prev_drive_req, _prev_prev_drive_req, _ignore_ultra_active, _ignore_ultra_cmd
 
     _last_pkt_t = time.time()
 
+    # Extract finger bits via bitwise shift
     flex = (payload >> 4) & 0x0F
     f0 = (flex >> 0) & 1
     f1 = (flex >> 1) & 1
     f2 = (flex >> 2) & 1
     f3 = (flex >> 3) & 1
 
-    # ---- autonomy trigger (keep your existing behavior) ----
-    if (f0 == 1 and f1 == 1 and f2 == 1 and f3 == 1) and not (prev_f0 == 1 and prev_f1 == 1 and prev_f2 == 1 and prev_f3 == 1):
+    # ---- Autonomy Trigger ----
+    if (f0 == 1 and f1 == 1 and f2 == 1 and f3 == 1) and not (_prev_f0 == 1 and _prev_f1 == 1 and _prev_f2 == 1 and _prev_f3 == 1):
         bring_bottle_xz()
 
-    # ---- servo edge detection ----
-    if f3 == 1 and prev_f3 == 0:
-        servo_move_step(1)  # close
-    if f2 == 1 and prev_f2 == 0:
-        servo_move_step(0)  # open
+    # ---- Servo Edge Detection ----
+    if f3 == 1 and _prev_f3 == 0:
+        servo_move_step(1)  # Close
+    if f2 == 1 and _prev_f2 == 0:
+        servo_move_step(0)  # Open
 
-    # ---- stepper held command ----
+    # ---- Stepper Held Command ----
     if f0 == 1 and f1 == 0:
         _arm_dir = -1
     elif f1 == 1 and f0 == 0:
@@ -442,10 +478,10 @@ def handle_payload(payload: int):
     else:
         _arm_dir = 0
 
-    # ---- update finger history for edge detection ----
-    prev_f0, prev_f1, prev_f2, prev_f3 = f0, f1, f2, f3
+    # ---- Update Finger History for Edge Detection ----
+    _prev_f0, _prev_f1, _prev_f2, _prev_f3 = f0, f1, f2, f3
 
-    # ---- decode drive request ----
+    # ---- Decode Drive Request ----
     pitch_code = payload & 0x03
     roll_code = (payload >> 2) & 0x03
 
@@ -465,20 +501,20 @@ def handle_payload(payload: int):
     too_close = obstacle_too_close()
 
     # ------------------------------------------------------------
-    # Ignore-ultrasonic MODE logic:
+    # Ignore-Ultrasonic Logic (Double-Tap bypass):
     # Arm when we see: X, STOP, X   (X in {FWD, LEFT, RIGHT})
     # Keep active only while holding the same X.
     # Disable when STOP or REV or direction change.
     # ------------------------------------------------------------
     allowed_dir = {"FWD", "LEFT", "RIGHT"}
 
-    # disable ignore mode if STOP/REV/changed dir
+    # Disable ignore mode if STOP/REV or changed direction
     if _ignore_ultra_active:
         if drive_req in ("STOP", "REV") or drive_req != _ignore_ultra_cmd:
             _ignore_ultra_active = False
             _ignore_ultra_cmd = None
 
-    # arm ignore mode on pattern X,STOP,X
+    # Arm ignore mode on pattern X, STOP, X
     if (not _ignore_ultra_active) and (drive_req in allowed_dir):
         if _prev_drive_req == "STOP" and _prev_prev_drive_req == drive_req:
             _ignore_ultra_active = True
@@ -487,7 +523,7 @@ def handle_payload(payload: int):
 
     ignore_ultra_now = (_ignore_ultra_active and drive_req == _ignore_ultra_cmd)
 
-    # ---- apply drive (reverse always allowed) ----
+    # ---- Apply Drive (Reverse always allowed) ----
     if drive_req == "REV":
         drive_reverse()
 
@@ -512,22 +548,59 @@ def handle_payload(payload: int):
     else:
         stop_drive()
 
-    # ---- update drive history (requested commands) ----
+    # ---- Update Drive History (Requested Commands) ----
     _prev_prev_drive_req = _prev_drive_req
     _prev_drive_req = drive_req
 
+def run_glove_loop() -> None:
+    global _arm_dir, _last_pkt_t, sock, last_rx, _red_led_fail_until
+    
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.bind((UDP_LISTEN_IP, UDP_PORT))
+    sock.settimeout(UDP_TIMEOUT_SEC)
+    
+    last_rx = _last_pkt_t = time.time()
+    print(f"debug: Listening for UDP packets on {UDP_LISTEN_IP}:{UDP_PORT}...")
+    
+    while True:
+        ultrasonic_tick()
 
+        now = time.time()
+        too_close = obstacle_too_close()
+        
+        # Red LED ON if obstacle detected OR failure timer is active
+        fail_active = (now < _red_led_fail_until)
+
+        if too_close or fail_active:
+            GPIO.output(RED_LED_PIN, GPIO.LOW)   # ON (PNP)
+        else:
+            GPIO.output(RED_LED_PIN, GPIO.HIGH)  # OFF
+
+        if _arm_dir != 0: 
+            run_arm(_arm_dir == 1)
+        else: 
+            stop_arm()
+
+        try:
+            data, _ = sock.recvfrom(PAYLOAD_BUFFER_SIZE)
+            if len(data) >= 3 and data[0] == FRAME_START and data[2] == FRAME_END:
+                handle_payload(data[1])
+                last_rx = time.time()
+        except socket.timeout:
+            if time.time() - last_rx > SILENCE_STOP_SEC: 
+                stop_drive()
+
+        time.sleep(CONTROL_PERIOD_SEC)
 
 if __name__ == "__main__":
     try:
-        init_vision();
+        init_vision()
         run_glove_loop()
     except KeyboardInterrupt:
         pass
     finally:
         stop_drive()
-        GPIO.output(RED_LED_PIN, GPIO.HIGH);
-
+        GPIO.output(RED_LED_PIN, GPIO.HIGH)
         GPIO.output(GREEN_LED_PIN, GPIO.HIGH)
-        GPIO.cleanup();
+        GPIO.cleanup()
         print("\n[OFF] System Stopped.")
