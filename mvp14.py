@@ -528,8 +528,9 @@ def bring_bottle_xz() -> None:
 
     drive_arc(found_bottle['X'], found_bottle['Z'])
     print("Arrived at bottle location via arc.")
-    time.sleep(1)
+    time.sleep(0.5)
     servo_move_step(1)
+    time.sleep(1)
 
 # ============================================================
 # MAIN GLOVE LOOP
