@@ -444,6 +444,7 @@ def turn_angle(theta_rad, left_turn: bool):
 
 def drive_arc(target_x, target_z):
     L = 36.0  # Track width (distance between wheels)
+    speed_diff = 1.05
 
     # 1. Calculate the radius of the arc
     # R is the distance from the Integrated Center of Rotation (ICR) to robot center
@@ -471,7 +472,7 @@ def drive_arc(target_x, target_z):
     angle = math.atan2(target_z, R - abs(target_x))
     total_arc_length = R * angle - 4.5
 
-    RIGHT_RPWM.value, LEFT_RPWM.value = v_right * 1.08, v_left
+    RIGHT_RPWM.value, LEFT_RPWM.value = v_right * speed_diff, v_left
     RIGHT_LPWM.value, LEFT_LPWM.value = 0.0, 0.0
 
     # 6. Monitor distance
@@ -546,6 +547,10 @@ if __name__ == "__main__":
                 bring_bottle_xz()
             elif cmd == 'b':
                 track_bottle_continuous()
+            elif cmd == 'f':
+                drive_forward(0.3)
+                time.sleep(2)
+                stop_drive()
             elif cmd == 'q':
                 break
                 
