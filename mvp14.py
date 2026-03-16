@@ -43,7 +43,6 @@ SILENCE_STOP_SEC = 0.7
 PAYLOAD_BUFFER_SIZE = 1024
 
 # --- Hardware Pins (BCM) ---
-
 SERVO_PIN = 12
 
 US1_TRIG, US1_ECHO = 5, 6
@@ -530,7 +529,7 @@ def bring_bottle_xz() -> None:
     drive_arc(found_bottle['X'], found_bottle['Z'])
     print("Arrived at bottle location via arc.")
     time.sleep(1)
-    servo_move_step(0)
+    servo_move_step(1)
 
 # ============================================================
 # MAIN GLOVE LOOP

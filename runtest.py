@@ -542,7 +542,7 @@ def bring_bottle_xz() -> None:
     drive_arc(found_bottle['X'], found_bottle['Z'])
     print("Arrived at bottle location via arc.")
     time.sleep(1)
-    servo_move_step(0)
+    servo_move_step(1)
 
 def track_bottle_continuous() -> None:
     print("\n[VISION] Starting continuous tracking. Press Ctrl+C to return to menu.")
