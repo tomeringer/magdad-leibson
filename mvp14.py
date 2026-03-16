@@ -131,7 +131,6 @@ GPIO.output(US2_TRIG, GPIO.LOW)
 # Glove history
 _prev_f0 = _prev_f1 = _prev_f2 = _prev_f3 = 0
 _arm_dir = 0
-_last_pkt_t = 0.0
 last_rx = 0.0
 
 # Drive state history
@@ -569,10 +568,8 @@ def bring_bottle_xz() -> None:
 # MAIN GLOVE LOOP
 # ============================================================
 def handle_payload(payload: int) -> None:
-    global _prev_f0, _prev_f1, _prev_f2, _prev_f3, _arm_dir, _last_pkt_t
+    global _prev_f0, _prev_f1, _prev_f2, _prev_f3, _arm_dir
     global _prev_drive_req, _prev_prev_drive_req, _ignore_ultra_active, _ignore_ultra_cmd
-
-    _last_pkt_t = time.time()
 
     # Extract finger bits via bitwise shift
     flex = (payload >> 4) & 0x0F
@@ -674,13 +671,13 @@ def handle_payload(payload: int) -> None:
     _prev_drive_req = drive_req
 
 def run_glove_loop() -> None:
-    global _arm_dir, _last_pkt_t, sock, last_rx
+    global _arm_dir, sock, last_rx
     
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind((UDP_LISTEN_IP, UDP_PORT))
     sock.settimeout(UDP_TIMEOUT_SEC)
     
-    last_rx = _last_pkt_t = time.time()
+    last_rx = time.time()
     print(f"debug: Listening for UDP packets on {UDP_LISTEN_IP}:{UDP_PORT}...")
     
     while True:
