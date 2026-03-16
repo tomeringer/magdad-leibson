@@ -505,8 +505,6 @@ def drive_arc(target_x: float, target_z: float) -> None:
     stop_drive()
 
 def bring_bottle_xz() -> None:
-    time.sleep(2)
-    
     z0 = Z0_STOP_DISTANCE_CM 
     t0 = time.perf_counter()
     found_bottle = {"found": False}
@@ -528,7 +526,7 @@ def bring_bottle_xz() -> None:
 
     drive_arc(found_bottle['X'], found_bottle['Z'])
     print("Arrived at bottle location via arc.")
-    time.sleep(0.5)
+    time.sleep(0.3)
     servo_move_step(1)
 
 # ============================================================
