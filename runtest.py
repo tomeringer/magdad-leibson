@@ -86,7 +86,7 @@ LEFT_LPWM = PWMOutputDevice(21, frequency=1000, initial_value=0, pin_factory=fac
 def stop_drive():
     RIGHT_RPWM.value = RIGHT_LPWM.value = LEFT_RPWM.value = LEFT_LPWM.value = 0.0
 
-speed_diff = 1.041
+speed_diff = 1.021
 
 def     drive_forward(speed: float = 0.3):
     RIGHT_RPWM.value, LEFT_RPWM.value = speed * speed_diff, speed
@@ -474,7 +474,7 @@ def drive_arc(target_x, target_z):
     total_arc_length = R * angle - 4.5
 
     #RIGHT_RPWM.value, LEFT_RPWM.value = v_right * speed_diff, v_left
-    RIGHT_RPWM.value, LEFT_RPWM.value = v_right, v_left
+    RIGHT_RPWM.value, LEFT_RPWM.value = v_right * speed_diff, v_left
     RIGHT_LPWM.value, LEFT_LPWM.value = 0.0, 0.0
 
     # 6. Monitor distance
