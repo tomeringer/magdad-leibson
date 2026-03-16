@@ -52,8 +52,8 @@ WHEEL_CIRCUMFERENCE_CM = math.pi * WHEEL_DIAMETER_CM
 TRACK_WIDTH_CM = 36.0  # Distance between the centers of the two wheels
 
 # Calibration factors for motor imbalances
-SPEED_DIFF_FACTOR = 1.041      # Multiplier for straight-line driving
-ARC_SPEED_DIFF_FACTOR = 1.041  # Dedicated multiplier for arc turns due to variable load/PWM linearity
+SPEED_DIFF_FACTOR = 1.04      # Multiplier for straight-line driving
+ARC_SPEED_DIFF_FACTOR = 1.06  # Dedicated multiplier for arc turns due to variable load/PWM linearity
 
 # Default motor speeds
 DEFAULT_DRIVE_SPEED = 0.3
