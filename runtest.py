@@ -86,7 +86,7 @@ LEFT_LPWM = PWMOutputDevice(21, frequency=1000, initial_value=0, pin_factory=fac
 def stop_drive():
     RIGHT_RPWM.value = RIGHT_LPWM.value = LEFT_RPWM.value = LEFT_LPWM.value = 0.0
 
-speed_diff = 1.082
+speed_diff = 1.08
 
 def drive_forward(speed: float = 0.3):
     RIGHT_RPWM.value, LEFT_RPWM.value = speed * speed_diff, speed
@@ -444,7 +444,6 @@ def turn_angle(theta_rad, left_turn: bool):
 
 def drive_arc(target_x, target_z):
     L = 36.0  # Track width (distance between wheels)
-    speed_diff = 1.05
 
     # 1. Calculate the radius of the arc
     # R is the distance from the Integrated Center of Rotation (ICR) to robot center
