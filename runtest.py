@@ -570,13 +570,15 @@ if __name__ == "__main__":
         print("Type 'q' and press Enter to quit.\n")
         
         while True:
-            cmd = input("Command (c/b/f/q): ").strip().lower()
+            cmd = input("Command (c/b/f/r/q): ").strip().lower()
             if cmd == 'c':
                 bring_bottle_xz()
             elif cmd == 'b':
                 track_bottle_continuous()
             elif cmd == 'f':
-                drive_distance(150, True)    
+                drive_distance(150, True)  
+            elif cmd == 'r':
+                drive_distance(150, False)    
             elif cmd == 'q':
                 break
                 
