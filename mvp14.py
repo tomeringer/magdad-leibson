@@ -62,7 +62,6 @@ ENC_LEFT_B = 25
 ENC_RIGHT_A = 9
 ENC_RIGHT_B = 10
 
-STEPPER_PINS = [23, 22, 27, 17]
 
 # --- Ultrasonic Settings ---
 ULTRA_STOP_CM = 40.0
@@ -82,7 +81,6 @@ DEFAULT_REVERSE_SPEED = 0.3
 ARC_MAX_OUTER_SPEED = 0.3  # The constant speed for the outer wheel during arc turns
 
 SERVO_MOVE_STEP = 0.39
-STEPPER_STEP_DELAY_SEC = 0.0015
 
 # --- Vision Math Offsets ---
 # These compensate for physical camera placement relative to the robot's center
@@ -252,7 +250,7 @@ def stop_arm() -> None:
     ARM_RPWM.value, ARM_LPWM.value = 0, 0
 
 # ============================================================
-# ENCODERS & STEPPER
+# ENCODERS
 # ============================================================
 class YellowJacketEncoder:
     _TRANS = {0b0001: +1, 0b0010: -1, 0b0100: -1, 0b0111: +1, 
@@ -297,38 +295,8 @@ class YellowJacketEncoder:
     def zero(self) -> None: 
         self.counts = self._c_last = 0
 
-
 enc_left = YellowJacketEncoder(pi_enc, ENC_LEFT_A, ENC_LEFT_B)
 enc_right = YellowJacketEncoder(pi_enc, ENC_RIGHT_A, ENC_RIGHT_B)
-
-class StepperMotor:
-    def __init__(self, pins: list):
-        self.pins = pins
-        self.pi = pigpio.pi()
-        self.seq = [[1, 0, 1, 0], [0, 1, 1, 0], [0, 1, 0, 1], [0, 0, 1, 1]]
-        for p in self.pins: 
-            self.pi.set_mode(p, pigpio.OUTPUT)
-
-    def step_chunk(self, steps: int, direction: int = 1, delay_sec: float = STEPPER_STEP_DELAY_SEC) -> None:
-        direction = 1 if direction >= 0 else -1
-        for _ in range(int(steps)):
-            for step in range(4):
-                idx = step if direction == 1 else 3 - step
-                for i, p in enumerate(self.pins): 
-                    self.pi.write(p, self.seq[idx][i])
-                time.sleep(delay_sec)
-        self.deenergize()
-
-    def deenergize(self) -> None:
-        for p in self.pins: 
-            self.pi.write(p, 0)
-
-    def close(self) -> None:
-        self.deenergize()
-        self.pi.stop()
-
-_stepper = StepperMotor(STEPPER_PINS)
-
 
 # ============================================================
 # VISION
@@ -711,6 +679,5 @@ if __name__ == "__main__":
     finally:
         stop_drive()
         shutdown_vision()
-        _stepper.close()
         GPIO.cleanup()
         print("\n[OFF] System Stopped.")
