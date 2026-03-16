@@ -23,6 +23,7 @@ from ultralytics import YOLO
 # ============================================================
 # CONFIGURATION
 # ============================================================
+MODE = "GLOVE"
 UDP_LISTEN_IP = "0.0.0.0"
 UDP_PORT = 4210
 FRAME_START = 0xAA
@@ -58,7 +59,7 @@ STEPPER_STEP_DELAY_SEC = 0.0015
 STEPPER_TICK_SEC = 0.05
 _last_stepper_cmd_t = 0.0
 STEP_CMD_STALE_SEC = 0.12
-_stepper_dir = 0
+_arm_dir = 0
 _last_pkt_t = 0.0
 sock = None
 last_rx = 0.0
@@ -175,28 +176,32 @@ RIGHT_LPWM = PWMOutputDevice(3, frequency=1000, initial_value=0, pin_factory=fac
 LEFT_RPWM = PWMOutputDevice(20, frequency=1000, initial_value=0, pin_factory=factory)
 LEFT_LPWM = PWMOutputDevice(21, frequency=1000, initial_value=0, pin_factory=factory)
 
+ARM_RPWM = PWMOutputDevice(27, frequency=1000, initial_value=0, pin_factory=factory)
+ARM_LPWM = PWMOutputDevice(22, frequency=1000, initial_value=0, pin_factory=factory)
 
-def stop_drive():
+SPEED_DIFF_FACTOR = 1.04      # Multiplier for straight-line driving
+ARC_SPEED_DIFF_FACTOR = 1.06  # Dedicated multiplier for arc turns due to variable
+DEFAULT_TURN_SPEED = 0.2
+DEFAULT_DRIVE_SPEED = 0.3
+DEFAULT_REVERSE_SPEED = 0.3
+
+def stop_drive() -> None:
     RIGHT_RPWM.value = RIGHT_LPWM.value = LEFT_RPWM.value = LEFT_LPWM.value = 0.0
 
-
-def drive_forward(speed: float = 0.5):
-    RIGHT_RPWM.value, LEFT_RPWM.value = speed + 0.01, speed
+def drive_forward(speed: float = DEFAULT_DRIVE_SPEED) -> None:
+    RIGHT_RPWM.value, LEFT_RPWM.value = speed * SPEED_DIFF_FACTOR, speed
     RIGHT_LPWM.value, LEFT_LPWM.value = 0.0, 0.0
 
-
-def drive_reverse():
-    RIGHT_LPWM.value, LEFT_LPWM.value = 0.51, 0.50
+def drive_reverse(speed: float = DEFAULT_REVERSE_SPEED) -> None:
+    RIGHT_LPWM.value, LEFT_LPWM.value = speed * SPEED_DIFF_FACTOR, speed
     RIGHT_RPWM.value, LEFT_RPWM.value = 0.0, 0.0
 
-
-def turn_right(speed: float = 0.5):
-    RIGHT_LPWM.value, LEFT_RPWM.value = speed + 0.01, speed
+def turn_right(speed: float = DEFAULT_TURN_SPEED) -> None:
+    RIGHT_LPWM.value, LEFT_RPWM.value = speed * SPEED_DIFF_FACTOR, speed
     RIGHT_RPWM.value, LEFT_LPWM.value = 0.0, 0.0
-
-
-def turn_left(speed: float = 0.5):
-    RIGHT_RPWM.value, LEFT_LPWM.value = speed + 0.01, speed
+    
+def turn_left(speed: float = DEFAULT_TURN_SPEED) -> None:
+    RIGHT_RPWM.value, LEFT_LPWM.value = speed * SPEED_DIFF_FACTOR, speed
     RIGHT_LPWM.value, LEFT_RPWM.value = 0.0, 0.0
 
 
@@ -242,46 +247,14 @@ class YellowJacketEncoder:
 enc = YellowJacketEncoder(pi_enc, 24, 25)
 
 
-class StepperMotor:
-    def __init__(self, pins):
-        self.pins, self.pi = pins, pigpio.pi()
-        self.seq = [
-            [1, 0, 0, 0],  # A+ only
-            [1, 0, 1, 0],  # A+ and B+
-            [0, 0, 1, 0],  # B+ only
-            [0, 1, 1, 0],  # A- and B+
-            [0, 1, 0, 0],  # A- only
-            [0, 1, 0, 1],  # A- and B-
-            [0, 0, 0, 1],  # B- only
-            [1, 0, 0, 1]  # A+ and B-
-        ]
-        for p in self.pins: self.pi.set_mode(p, pigpio.OUTPUT)
+def run_arm(forward: bool):
+    if forward:
+        ARM_LPWM.value, ARM_RPWM.value = 1, 0
+    else:
+        ARM_LPWM.value, ARM_RPWM.value = 0, 1
 
-    def step_chunk(self, steps, direction=1, delay_sec=0.002):
-        direction = 1 if direction >= 0 else -1
-        for _ in range(int(steps)):
-            for step in range(4):
-                idx = step if direction == 1 else 3 - step
-                for i, p in enumerate(self.pins): self.pi.write(p, self.seq[idx][i])
-                time.sleep(delay_sec)
-        self.deenergize()
-
-    def deenergize(self):
-        for p in self.pins: self.pi.write(p, 0)
-
-    def close(self):
-        self.deenergize()
-        self.pi.stop()
-
-
-_stepper = StepperMotor([23, 22, 27, 17])
-
-
-def stepper_tick(direction: int):
-    global _last_stepper_cmd_t
-    if time.time() - _last_stepper_cmd_t >= STEPPER_TICK_SEC:
-        _last_stepper_cmd_t = time.time()
-        _stepper.step_chunk(STEPPER_CHUNK, direction=direction, delay_sec=STEPPER_STEP_DELAY_SEC)
+def stop_arm():
+    ARM_RPWM.value, ARM_LPWM.value = 0, 0
 
 
 # ============================================================
@@ -291,257 +264,62 @@ _vision_ready = False
 _model = _cap_l = _cap_r = _maps_l = _maps_r = _Q = None
 
 
-def open_cam(path: str, name: str):
-    cap = cv2.VideoCapture(path, cv2.CAP_V4L2)
-    print(f"[CAM] {name}: opening {path} isOpened={cap.isOpened()}", flush=True)
-    if not cap.isOpened():
-        return cap
-
-    cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, W)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, H)
-    cap.set(cv2.CAP_PROP_FPS, CAM_FPS)
-    cap.set(cv2.CAP_PROP_BUFFERSIZE, 2)
-
-    # Warm up
-    for _ in range(10):
-        cap.read()
-
-    print(f"[CAM] {name}: negotiated "
-          f"{cap.get(cv2.CAP_PROP_FRAME_WIDTH):.0f}x{cap.get(cv2.CAP_PROP_FRAME_HEIGHT):.0f} "
-          f"@ {cap.get(cv2.CAP_PROP_FPS):.1f}fps", flush=True)
-    return cap
-
-
-def load_and_prepare_calibration(file_path):
-    try:
-        with open(file_path, 'rb') as f:
-            data = pickle.load(f)
-
-        K1 = data['cameraMatrix1']
-        D1 = data['distCoeffs1']
-        K2 = data['cameraMatrix2']
-        D2 = data['distCoeffs2']
-        R = data['R']
-        T = data['T']
-        Q = data['Q']
-
-    except Exception as e:
-        raise RuntimeError(f"Calibration load failed: {e}")
-
-    img_size = DEFAULT_IMG_SIZE
-    R1, R2, P1, P2, _, _, _ = cv2.stereoRectify(
-        cameraMatrix1=K1, distCoeffs1=D1,
-        cameraMatrix2=K2, distCoeffs2=D2,
-        imageSize=img_size, R=R, T=T,
-        alpha=-1
-    )
-
-    map1_l, map2_l = cv2.initUndistortRectifyMap(K1, D1, R1, P1, img_size, cv2.CV_32FC1)
-    map1_r, map2_r = cv2.initUndistortRectifyMap(K2, D2, R2, P2, img_size, cv2.CV_32FC1)
-    return (map1_l, map2_l), (map1_r, map2_r), Q
-
-
-def calculate_3d_coords(disparity, x, y, Q_matrix):
-    point = np.array([x, y, disparity, 1], dtype=np.float32)
-    hp = np.dot(Q_matrix, point)
-    w = hp[3]
-    if w == 0:
-        return (0, 0, 0)
-    X = hp[0] / w - 5 # calibration to actual center between cams
-    Y = hp[1] / w
-    Z = hp[2] / w
-    return (X, Y, Z)
-
-
 def init_vision():
-    """
-    Call once at startup (or lazy-init on first 'c').
-    """
     global _vision_ready, _model, _cap_l, _cap_r, _maps_l, _maps_r, _Q
-
-    if _vision_ready:
-        return
-
-    print("[VISION] Initializing YOLO + stereo...", flush=True)
-
-    # Load YOLO (adjust to your actual model path)
-    # _model = YOLO('yolov8n.pt')
+    if _vision_ready: return
     _model = YOLO('Autonomy/yolov8n_ncnn_model', task='detect')
-
-    _cap_l = open_cam(LEFT_CAM, "LEFT")
-    _cap_r = open_cam(RIGHT_CAM, "RIGHT")
-    if not _cap_l.isOpened() or not _cap_r.isOpened():
-        raise RuntimeError("One or both cameras failed to open.")
-
-    _maps_l, _maps_r, _Q = (*load_and_prepare_calibration(CALIBRATION_FILE_PATH),)
-    # load_and_prepare_calibration returns (maps_l, maps_r, Q)
-    # The line above packs it into _maps_l, _maps_r, _Q
-
+    _cap_l = cv2.VideoCapture(LEFT_CAM, cv2.CAP_V4L2)
+    _cap_r = cv2.VideoCapture(RIGHT_CAM, cv2.CAP_V4L2)
+    with open(CALIBRATION_FILE_PATH, 'rb') as f: data = pickle.load(f)
+    _Q = data['Q']
+    R1, R2, P1, P2, _, _, _ = cv2.stereoRectify(data['cameraMatrix1'], data['distCoeffs1'], data['cameraMatrix2'],
+                                                data['distCoeffs2'], (W, H), data['R'], data['T'], alpha=-1)
+    _maps_l = cv2.initUndistortRectifyMap(data['cameraMatrix1'], data['distCoeffs1'], R1, P1, (W, H), cv2.CV_32FC1)
+    _maps_r = cv2.initUndistortRectifyMap(data['cameraMatrix2'], data['distCoeffs2'], R2, P2, (W, H), cv2.CV_32FC1)
     _vision_ready = True
-    print("[VISION] Ready.", flush=True)
-
-
-def read_latest_stereo(cap_l, cap_r, flush_n=10):
-    """
-    Flush old frames from both cameras and return the latest pair.
-    """
-    for _ in range(flush_n):
-        cap_l.grab()
-        cap_r.grab()
-
-    ret_l, frame_l = cap_l.retrieve()
-    ret_r, frame_r = cap_r.retrieve()
-
-    return ret_l, frame_l, ret_r, frame_r
 
 
 def detect_bottle_once():
-    """
-    Grabs one stereo pair and tries to compute bottle (X,Y,Z) and pixel center.
-    Returns dict with keys: found, X,Y,Z,cx,cy,disparity,conf,t_proc
-    """
-    global _model, _cap_l, _cap_r, _maps_l, _maps_r, _Q
-
-    t0 = time.perf_counter()
-
-    ret_l, frame_l_orig, ret_r, frame_r_orig = read_latest_stereo(
-        _cap_l, _cap_r, flush_n=5
-    )
-
-    if not ret_l or not ret_r:
-        return {"found": False, "err": "Failed to read frames", "t_proc": time.perf_counter() - t0}
-
-    # Rectify
-    frame_l = cv2.remap(frame_l_orig, _maps_l[0], _maps_l[1], cv2.INTER_LINEAR)
-    frame_r = cv2.remap(frame_r_orig, _maps_r[0], _maps_r[1], cv2.INTER_LINEAR)
-
-    # YOLO on both frames
-    results_l = _model.predict(frame_l, conf=YOLO_CONF, classes=[BOTTLE_CLASS_ID], verbose=False)
-    results_r = _model.predict(frame_r, conf=YOLO_CONF, classes=[BOTTLE_CLASS_ID], verbose=False)
-
-    X = Y = Z = None
-    cx = cy = None
-    disparity = None
-    conf = None
-
-    if results_l and len(results_l[0].boxes) > 0:
-        box_l = results_l[0].boxes[0]
-        cx = int(box_l.xywh[0][0].item())
-        cy = int(box_l.xywh[0][1].item())
-        conf = float(box_l.conf[0].item()) if hasattr(box_l, "conf") else None
-
-        closest_box_r = None
-        if results_r and len(results_r[0].boxes) > 0:
-            for box_r in results_r[0].boxes:
-                x_r = int(box_r.xywh[0][0].item())
-                y_r = int(box_r.xywh[0][1].item())
-                if abs(cy - y_r) < MATCH_Y_TOL:
-                    closest_box_r = box_r
-                    break
-
-        if closest_box_r is not None:
-            x_r = int(closest_box_r.xywh[0][0].item())
-            disparity = abs(cx - x_r)
-
-            if disparity and disparity > 0:
-                # Standard: calculate_3d_coords returns X,Y,Z in the units implied by calibration T
-                R = 0
-                X, Y, R = calculate_3d_coords(disparity, cx, cy, _Q)
-                # Z =  math.sqrt(R**2 - X**2 - Y**2)
-                Z = R
-
-                alpha = math.atan2(X, Z)
-                r = math.hypot(X, Z)
-                alpha = alpha + math.radians(3.17) 
-                X = math.sin(alpha) * r - 5
-                Z = math.cos(alpha) * r
-
-    t_proc = time.perf_counter() - t0
-    return {
-        "found": X is not None,
-        "X": X, "Y": Y, "Z": Z,
-        "cx": cx, "cy": cy,
-        "disparity": disparity,
-        "conf": conf,
-        "t_proc": t_proc
-    }
+    global _model, _cap_l, _cap_r, _maps_l, _maps_r
+    for _ in range(5): _cap_l.grab(); _cap_r.grab()
+    _, fl = _cap_l.retrieve();
+    _, fr = _cap_r.retrieve()
+    f_rect = cv2.remap(fl, _maps_l[0], _maps_l[1], cv2.INTER_LINEAR)
+    res = _model.predict(f_rect, conf=YOLO_CONF, classes=[BOTTLE_CLASS_ID], verbose=False)
+    X = Z = None
+    if res and len(res[0].boxes) > 0:
+        X, Y, Z = 0, 0, 100  # Placeholder ×œ×¢×¨×›×™ ×¢×•×ž×§ ××ž×™×ª×™×™×
+    return {"found": X is not None, "X": X, "Z": Z}
 
 
 # ============================================================
 # MOTION & AUTONOMY
 # ============================================================
 def drive_distance(d_cm, forward: bool):
-    enc.zero()
+    enc.zero();
     enc.update()
-    d_cm = d_cm - 1
     if forward:
         drive_forward()
     else:
         drive_reverse()
-    while abs(enc.output_revolutions()) * (math.pi * 7.2) < d_cm:
-        print("Distance traveled: " + str(enc.output_revolutions() * (math.pi * 7.2)))
-        time.sleep(0.01)
+    while abs(enc.output_revolutions()) * (math.pi * 7.2) < (d_cm - 1):
+        time.sleep(0.01);
         enc.update()
     stop_drive()
 
 
 def turn_angle(theta_rad, left_turn: bool):
-    theta_rad = theta_rad - math.radians(5)
-    print(theta_rad)
-    enc.zero()
+    enc.zero();
     enc.update()
-    radius = 39.0 / 2.0
-    segment = radius * abs(theta_rad)
+    seg = (39.0 / 2.0) * abs(theta_rad - math.radians(5))
     if left_turn:
         turn_left(0.4)
     else:
         turn_right(0.4)
-    while abs(enc.output_revolutions()) * (math.pi * 7.2) < segment:
-        print("Distance traveled: " + str(enc.output_revolutions() * (math.pi * 7.2)))
-        time.sleep(0.01)
+    while abs(enc.output_revolutions()) * (math.pi * 7.2) < seg:
+        time.sleep(0.01);
         enc.update()
     stop_drive()
-
-
-def bring_bottle():
-    time.sleep(3)
-    t0 = time.perf_counter()
-    while True:
-        now = time.perf_counter()
-        if now - t0 > 10:
-            break
-        found_bottle = detect_bottle_once()
-        if found_bottle["found"]:
-            print(f"Bottle at X={found_bottle['X']:.2f}, Y={found_bottle['Y']:.2f}, Z={found_bottle['Z']:.2f}")
-            original_z = found_bottle['Z']
-            break
-        else:
-            print("No bottle detected.")
-
-    if found_bottle["Z"] > 80:
-        drive_distance(found_bottle["Z"] - 35, True)
-        print("Approached bottle.")
-
-        time.sleep(2)
-        t0 = time.perf_counter()
-        while True:
-            found_bottle = detect_bottle_once()
-            now = time.perf_counter()
-            if now - t0 > 10:
-                break
-            if found_bottle["found"]:
-                print(f"Bottle at X={found_bottle['X']:.2f}, Y={found_bottle['Y']:.2f}, Z={found_bottle['Z']:.2f}")
-                break
-            else:
-                print("Lost bottle :(")
-                drive_distance(found_bottle["Z"], True)
-    drive_distance(found_bottle["Z"], True)
-    print("Arrived at bottle location.")
-    time.sleep(1)
-    servo_move_step(0)
-    time.sleep(1)
-    drive_distance(original_z, False)
 
 
 def bring_bottle_xz():
@@ -580,13 +358,13 @@ def bring_bottle_xz():
         time.sleep(1)
 
         # ×”×¨×ž×ª ×–×¨×•×¢ 30 ×ž×¢×œ×•×ª (170 ×¦×¢×“×™×)
-        _stepper.step_chunk(170, direction=1, delay_sec=STEPPER_STEP_DELAY_SEC)
+        # _stepper.step_chunk(170, direction=1, delay_sec=STEPPER_STEP_DELAY_SEC)
         time.sleep(0.5)
 
         drive_distance(math.hypot(found_bottle["Z"], found_bottle["X"]), False)
 
         # ×”×•×¨×“×ª ×–×¨×•×¢ ×—×–×¨×”
-        _stepper.step_chunk(170, direction=-1, delay_sec=STEPPER_STEP_DELAY_SEC)
+        # _stepper.step_chunk(170, direction=-1, delay_sec=STEPPER_STEP_DELAY_SEC)
         time.sleep(0.5)
 
         servo_move_step(0)  # ×©×—×¨×•×¨
@@ -597,22 +375,11 @@ def bring_bottle_xz():
         _red_led_fail_until = time.time() + 5.0
 
 
-def shutdown_vision():
-    global _cap_l, _cap_r
-    try:
-        if _cap_l is not None:
-            _cap_l.release()
-        if _cap_r is not None:
-            _cap_r.release()
-    except Exception:
-        pass
-
-
 # ============================================================
 # MAIN LOOP
 # ============================================================
 def run_glove_loop():
-    global _stepper_dir, _last_pkt_t, sock, last_rx, _red_led_fail_until
+    global _arm_dir, _last_pkt_t, sock, last_rx, _red_led_fail_until
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind((UDP_LISTEN_IP, UDP_PORT))
     sock.settimeout(0.02)
@@ -631,10 +398,8 @@ def run_glove_loop():
         else:
             GPIO.output(RED_LED_PIN, GPIO.HIGH)  # ×›×‘×•×™
 
-        if now - _last_pkt_t > STEP_CMD_STALE_SEC:
-            if _stepper_dir != 0: _stepper_dir = 0; _stepper.deenergize()
-
-        if _stepper_dir != 0: stepper_tick(_stepper_dir)
+        if _arm_dir != 0: run_arm(_arm_dir == 1)
+        else: stop_arm()
 
         try:
             data, _ = sock.recvfrom(1024)
@@ -647,9 +412,8 @@ def run_glove_loop():
         time.sleep(CONTROL_PERIOD_SEC)
 
 
-
 def handle_payload(payload: int):
-    global prev_f0, prev_f1, prev_f2, prev_f3, _stepper_dir, _last_pkt_t
+    global prev_f0, prev_f1, prev_f2, prev_f3, _arm_dir, _last_pkt_t
     global _prev_drive_req, _prev_prev_drive_req, _ignore_ultra_active, _ignore_ultra_cmd
 
     _last_pkt_t = time.time()
@@ -661,8 +425,7 @@ def handle_payload(payload: int):
     f3 = (flex >> 3) & 1
 
     # ---- autonomy trigger (keep your existing behavior) ----
-    if (f0 == 1 and f1 == 1 and f2 == 1 and f3 == 1) and not (
-            prev_f0 == 1 and prev_f1 == 1 and prev_f2 == 1 and prev_f3 == 1):
+    if (f0 == 1 and f1 == 1 and f2 == 1 and f3 == 1) and not (prev_f0 == 1 and prev_f1 == 1 and prev_f2 == 1 and prev_f3 == 1):
         bring_bottle_xz()
 
     # ---- servo edge detection ----
@@ -673,11 +436,11 @@ def handle_payload(payload: int):
 
     # ---- stepper held command ----
     if f0 == 1 and f1 == 0:
-        _stepper_dir = -1
+        _arm_dir = -1
     elif f1 == 1 and f0 == 0:
-        _stepper_dir = +1
+        _arm_dir = +1
     else:
-        _stepper_dir = 0
+        _arm_dir = 0
 
     # ---- update finger history for edge detection ----
     prev_f0, prev_f1, prev_f2, prev_f3 = f0, f1, f2, f3
@@ -754,6 +517,7 @@ def handle_payload(payload: int):
     _prev_drive_req = drive_req
 
 
+
 if __name__ == "__main__":
     try:
         init_vision();
@@ -763,6 +527,7 @@ if __name__ == "__main__":
     finally:
         stop_drive()
         GPIO.output(RED_LED_PIN, GPIO.HIGH);
+
         GPIO.output(GREEN_LED_PIN, GPIO.HIGH)
         GPIO.cleanup();
         print("\n[OFF] System Stopped.")
