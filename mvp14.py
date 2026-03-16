@@ -404,31 +404,6 @@ def hard_reset_usb_all() -> None:
     except Exception as e:
         print(f"[ERROR] Could not perform USB reset: {e}")
 
-def hard_reset_usb() -> None:
-    """Targeted reset for specific camera USB ports."""
-    camera_ports = ['1-1.3', '1-1.4']
-    
-    print(f"[SYSTEM] Resetting specific camera ports: {camera_ports}...", flush=True)
-    
-    for port in camera_ports:
-        try:
-            os.system(f"echo '{port}' | sudo tee /sys/bus/usb/drivers/usb/unbind > /dev/null")
-            print(f"  -> Port {port} unbound.")
-        except Exception: 
-            pass
-
-    time.sleep(2) 
-
-    for port in camera_ports:
-        try:
-            os.system(f"echo '{port}' | sudo tee /sys/bus/usb/drivers/usb/bind > /dev/null")
-            print(f"  -> Port {port} bound.")
-        except Exception: 
-            pass
-        
-    print("[SYSTEM] Specific reset complete. Waiting for recovery...", flush=True)
-    time.sleep(3)
-
 def init_vision() -> None:
     global _vision_ready, _model, _cap_l, _cap_r, _maps_l, _maps_r, _Q
     if _vision_ready:
@@ -524,59 +499,6 @@ def get_average_distance() -> float:
     dist_right = abs(enc_right.output_revolutions()) * WHEEL_CIRCUMFERENCE_CM
     return (dist_left + dist_right) / 2.0
 
-def drive_distance(d_cm: float, forward: bool) -> None:
-    enc_left.zero()
-    enc_right.zero()
-    enc_left.update()
-    enc_right.update()
-    
-    # Targeting 1cm less than requested to account for momentum/inertia
-    target_dist = d_cm - 1 
-    
-    if forward:
-        drive_forward(DEFAULT_DRIVE_SPEED)
-    else:
-        drive_reverse(DEFAULT_REVERSE_SPEED)
-        
-    current_dist = 0.0
-    while current_dist < target_dist:
-        enc_left.update()
-        enc_right.update()
-        current_dist = get_average_distance()
-        
-        if DEBUG_MODE:
-            print(f"Distance traveled: R={abs(enc_right.output_revolutions()):.3f}, "
-                  f"L={abs(enc_left.output_revolutions()):.3f}")
-        time.sleep(0.01)
-        
-    stop_drive()
-
-def turn_angle(theta_rad: float, left_turn: bool) -> None:
-    enc_left.zero()
-    enc_right.zero()
-    enc_left.update()
-    enc_right.update()
-    
-    radius = TRACK_WIDTH_CM / 2.0
-    segment_length = radius * abs(theta_rad)
-    
-    if left_turn:
-        turn_left(DEFAULT_TURN_SPEED)
-    else:
-        turn_right(DEFAULT_TURN_SPEED)
-        
-    current_dist = 0.0
-    while current_dist < segment_length:
-        enc_left.update()
-        enc_right.update()
-        current_dist = get_average_distance()
-        
-        if DEBUG_MODE:
-            print(f"Distance traveled: {current_dist:.2f}")
-        time.sleep(0.01)
-        
-    stop_drive()
-
 def drive_arc(target_x: float, target_z: float) -> None:
     # 1. Calculate the radius of the arc
     R = (target_x ** 2 + target_z ** 2) / (2 * abs(target_x))
@@ -642,19 +564,6 @@ def bring_bottle_xz() -> None:
     print("Arrived at bottle location via arc.")
     time.sleep(1)
     servo_move_step(0)
-
-def track_bottle_continuous() -> None:
-    print("\n[VISION] Starting continuous tracking. Press Ctrl+C to return to menu.")
-    try:
-        while True:
-            bottle = detect_bottle_once()
-            if bottle["found"]:
-                print(f"Bottle Location -> X: {bottle['X']:.2f}, Y: {bottle['Y']:.2f}, Z: {bottle['Z']:.2f}")
-            else:
-                print("Bottle not found...")
-            time.sleep(0.1)
-    except KeyboardInterrupt:
-        print("\n[VISION] Tracking stopped. Returning to menu.")
 
 # ============================================================
 # MAIN GLOVE LOOP
