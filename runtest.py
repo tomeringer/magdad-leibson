@@ -450,7 +450,7 @@ def drive_arc(target_x, target_z):
 
     # 1. Calculate the radius of the arc
     # R is the distance from the Integrated Center of Rotation (ICR) to robot center
-    R = abs((target_x ** 2 + target_z ** 2 + 2*target_z*z0) / (2 * target_x))
+    R = abs((target_x ** 2 + target_z ** 2 - z0**2) / (2 * target_x))
 
     # 2. Define wheel radii
     r_inner = R - (L / 2)
