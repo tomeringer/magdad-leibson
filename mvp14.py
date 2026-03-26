@@ -217,8 +217,7 @@ RIGHT_LPWM = PWMOutputDevice(RIGHT_LPWM_PIN, frequency=1000, initial_value=0, pi
 LEFT_RPWM = PWMOutputDevice(LEFT_RPWM_PIN, frequency=1000, initial_value=0, pin_factory=factory)
 LEFT_LPWM = PWMOutputDevice(LEFT_LPWM_PIN, frequency=1000, initial_value=0, pin_factory=factory)
 
-ARM_RPWM = PWMOutputDevice(ARM_RPWM_PIN, frequency=1000, initial_value=0, pin_factory=factory)
-ARM_LPWM = PWMOutputDevice(ARM_LPWM_PIN, frequency=1000, initial_value=0, pin_factory=factory)
+arm = Servo(15, min_pulse_width=1/1000, max_pulse_width=2/1000)
 
 def stop_drive() -> None:
     RIGHT_RPWM.value = RIGHT_LPWM.value = LEFT_RPWM.value = LEFT_LPWM.value = 0.0
@@ -241,12 +240,12 @@ def turn_left(speed: float = DEFAULT_TURN_SPEED) -> None:
 
 def run_arm(forward: bool) -> None:
     if forward:
-        ARM_LPWM.value, ARM_RPWM.value = 1, 0
+        arm.value = 1.0
     else:
-        ARM_LPWM.value, ARM_RPWM.value = 0, 1
+        arm.value = -1.0
 
 def stop_arm() -> None:
-    ARM_RPWM.value, ARM_LPWM.value = 0, 0
+    arm.value = 0
 
 # ============================================================
 # ENCODERS
