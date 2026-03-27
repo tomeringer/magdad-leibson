@@ -220,7 +220,7 @@ RIGHT_LPWM = PWMOutputDevice(RIGHT_LPWM_PIN, frequency=1000, initial_value=0, pi
 LEFT_RPWM = PWMOutputDevice(LEFT_RPWM_PIN, frequency=1000, initial_value=0, pin_factory=factory)
 LEFT_LPWM = PWMOutputDevice(LEFT_LPWM_PIN, frequency=1000, initial_value=0, pin_factory=factory)
 
-arm = Servo(14, min_pulse_width=1/1000, max_pulse_width=2/1000)
+arm = Servo(14, pin_factory=factory, min_pulse_width=1/1000, max_pulse_width=2/1000)
 
 def stop_drive() -> None:
     RIGHT_RPWM.value = RIGHT_LPWM.value = LEFT_RPWM.value = LEFT_LPWM.value = 0.0
