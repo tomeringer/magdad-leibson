@@ -1,215 +1,167 @@
 #!/usr/bin/env python3
-import pigpio
-import socket
-import sys
-import termios
-import tty
-
+import os, time, socket, math, sys, tty, termios, pigpio
 import RPi.GPIO as GPIO
 from gpiozero.pins.pigpio import PiGPIOFactory
 
-from arm import *
-from chassis import *
-# Import all from modules (simulating flat code)
-from gripper import *
-from vision import *
+# Import as namespaces to avoid NoneType copy errors
+import chassis
+import gripper
+import arm
+import vision
 
 os.environ['PIGPIO_ADDR'] = 'localhost'
 
-# --- Config ---
-UDP_LISTEN_IP, UDP_PORT = "0.0.0.0", 4210
-FRAME_START, FRAME_END = 0xAA, 0x55
-UDP_TIMEOUT_SEC, SILENCE_STOP_SEC = 0.02, 0.7
-CONTROL_PERIOD_SEC = 0.01
-BOTTLE_SEARCH_TIMEOUT_SEC = 5.0
+# Constants
 ARC_STOP_OFFSET_CM, Z0_STOP_DISTANCE_CM = 4.5, 21.0
 ARC_MAX_OUTER_SPEED, ARC_SPEED_DIFF_FACTOR = 0.3, 1.06
 LEFT_CAM_PATH = "/dev/v4l/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.4:1.0-video-index0"
 RIGHT_CAM_PATH = "/dev/v4l/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.1:1.0-video-index0"
 CALIBRATION_FILE_PATH = "Autonomy/stereo_calibration.pkl"
 
-# --- Global State ---
+# Initial Setup
 factory = PiGPIOFactory()
 pi_enc = pigpio.pi()
 GPIO.setmode(GPIO.BCM)
-GPIO.setwarnings(False)
 
-last_rx = 0.0
 _arm_dir = 0
-_prev_f0 = _prev_f1 = _prev_f2 = _prev_f3 = 0
-_prev_drive_req = _prev_prev_drive_req = "STOP"
-_ignore_ultra_active = False
-_ignore_ultra_cmd = None
+_prev_f = [0, 0, 0, 0]
+_drive_hist = ["STOP", "STOP"]
+_ignore_ultra = [False, None]
+last_rx = 0.0
 
 
 def get_average_distance():
-    dist_l = abs(enc_left.output_revolutions()) * WHEEL_CIRCUMFERENCE_CM
-    dist_r = abs(enc_right.output_revolutions()) * WHEEL_CIRCUMFERENCE_CM
+    dist_l = abs(chassis.enc_left.output_revolutions()) * chassis.WHEEL_CIRCUMFERENCE_CM
+    dist_r = abs(chassis.enc_right.output_revolutions()) * chassis.WHEEL_CIRCUMFERENCE_CM
     return (dist_l + dist_r) / 2.0
 
 
 def drive_arc(target_x, target_z):
     R = (target_x ** 2 + target_z ** 2) / (2 * abs(target_x))
-    r_in, r_out = R - (TRACK_WIDTH_CM / 2), R + (TRACK_WIDTH_CM / 2)
+    r_in, r_out = R - (chassis.TRACK_WIDTH_CM / 2), R + (chassis.TRACK_WIDTH_CM / 2)
     s_in = ARC_MAX_OUTER_SPEED * (r_in / r_out)
+    v_l, v_r = (ARC_MAX_OUTER_SPEED, s_in) if target_x > 0 else (s_in, ARC_MAX_OUTER_SPEED)
+    total_arc = R * math.atan2(target_z, R - abs(target_x)) - ARC_STOP_OFFSET_CM
 
-    if target_x > 0:
-        v_l, v_r = ARC_MAX_OUTER_SPEED, s_in
-    else:
-        v_l, v_r = s_in, ARC_MAX_OUTER_SPEED
-
-    angle = math.atan2(target_z, R - abs(target_x))
-    total_arc = R * angle - ARC_STOP_OFFSET_CM
-
-    RIGHT_RPWM.value, LEFT_RPWM.value = v_r * ARC_SPEED_DIFF_FACTOR, v_l
-    RIGHT_LPWM.value = LEFT_LPWM.value = 0.0
-
-    enc_left.zero();
-    enc_right.zero()
-    while get_average_distance() < total_arc:
-        time.sleep(0.01)
-    stop_drive()
+    # Call through chassis namespace
+    chassis.RIGHT_RPWM.value, chassis.LEFT_RPWM.value = v_r * ARC_SPEED_DIFF_FACTOR, v_l
+    chassis.RIGHT_LPWM.value = chassis.LEFT_LPWM.value = 0.0
+    chassis.enc_left.zero();
+    chassis.enc_right.zero()
+    while get_average_distance() < total_arc: time.sleep(0.01)
+    chassis.stop_drive()
 
 
 def bring_bottle_xz():
-    servo_move_step(0)
+    gripper.move_step(0)
     t0 = time.perf_counter()
-    while True:
-        res = detect_bottle_once()
-        if time.perf_counter() - t0 > BOTTLE_SEARCH_TIMEOUT_SEC: return
+    while time.perf_counter() - t0 < 5.0:
+        res = vision.detect_bottle_once()
         if res["found"]:
             drive_arc(res['X'], res['Z'])
-            time.sleep(0.3)
-            servo_move_step(1)
-            break
+            time.sleep(0.3);
+            gripper.move_step(1);
+            return
         time.sleep(0.1)
 
 
 def handle_payload(payload):
-    global _prev_f0, _prev_f1, _prev_f2, _prev_f3, _arm_dir
-    global _prev_drive_req, _prev_prev_drive_req, _ignore_ultra_active, _ignore_ultra_cmd
-
-    flex = (payload >> 4) & 0x0F
-    f0, f1, f2, f3 = (flex >> 0) & 1, (flex >> 1) & 1, (flex >> 2) & 1, (flex >> 3) & 1
-
-    if (f0 == f1 == f2 == f3 == 1) and not (_prev_f0 == _prev_f1 == _prev_f2 == _prev_f3 == 1):
-        stop_drive();
-        stop_arm();
+    global _arm_dir, _prev_f, _drive_hist, _ignore_ultra, last_rx
+    f = [(payload >> (4 + i)) & 1 for i in range(4)]
+    if all(f) and not all(_prev_f):
+        chassis.stop_drive();
+        arm.stop();
         bring_bottle_xz()
-        _prev_f0, _prev_f1, _prev_f2, _prev_f3 = f0, f1, f2, f3
-        return
-
-    if f3 == 1 and _prev_f3 == 0: servo_move_step(1)
-    if f2 == 1 and _prev_f2 == 0: servo_move_step(0)
-
-    if f0 == 1 and f1 == 0:
-        _arm_dir = -1
-    elif f1 == 1 and f0 == 0:
-        _arm_dir = +1
     else:
-        _arm_dir = 0
+        if f[3] and not _prev_f[3]: gripper.move_step(1)
+        if f[2] and not _prev_f[2]: gripper.move_step(0)
+        _arm_dir = -1 if (f[0] and not f[1]) else 1 if (f[1] and not f[0]) else 0
 
-    _prev_f0, _prev_f1, _prev_f2, _prev_f3 = f0, f1, f2, f3
-    p_code, r_code = payload & 0x03, (payload >> 2) & 0x03
-    drive_req = "REV" if p_code == 1 else "FWD" if p_code == 2 else "LEFT" if r_code == 1 else "RIGHT" if r_code == 2 else "STOP"
+        p, r = payload & 0x03, (payload >> 2) & 0x03
+        req = "REV" if p == 1 else "FWD" if p == 2 else "LEFT" if r == 1 else "RIGHT" if r == 2 else "STOP"
 
-    too_close = obstacle_too_close()
-    if _ignore_ultra_active and (drive_req in ("STOP", "REV") or drive_req != _ignore_ultra_cmd):
-        _ignore_ultra_active = False
-    if (not _ignore_ultra_active) and (drive_req in {"FWD", "LEFT", "RIGHT"}):
-        if _prev_drive_req == "STOP" and _prev_prev_drive_req == drive_req:
-            _ignore_ultra_active, _ignore_ultra_cmd = True, drive_req
+        too_close = chassis.obstacle_too_close()
+        if _ignore_ultra[0] and (req in ("STOP", "REV") or req != _ignore_ultra[1]): _ignore_ultra[0] = False
+        if (not _ignore_ultra[0]) and req in {"FWD", "LEFT", "RIGHT"}:
+            if _drive_hist[1] == "STOP" and _drive_hist[0] == req: _ignore_ultra[:] = [True, req]
 
-    ignore = (_ignore_ultra_active and drive_req == _ignore_ultra_cmd)
-    if drive_req == "REV":
-        drive_reverse()
-    elif drive_req == "FWD":
-        drive_forward() if (not too_close or ignore) else stop_drive()
-    elif drive_req == "LEFT":
-        turn_left() if (not too_close or ignore) else stop_drive()
-    elif drive_req == "RIGHT":
-        turn_right() if (not too_close or ignore) else stop_drive()
-    else:
-        stop_drive()
-
-    _prev_prev_drive_req, _prev_drive_req = _prev_drive_req, drive_req
-
-
-def run_glove_loop():
-    global last_rx
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.bind((UDP_LISTEN_IP, UDP_PORT))
-    sock.settimeout(UDP_TIMEOUT_SEC)
-    last_rx = time.time()
-    while True:
-        ultrasonic_tick()
-        if _arm_dir != 0:
-            run_arm(_arm_dir == 1)
+        ign = (_ignore_ultra[0] and req == _ignore_ultra[1])
+        if req == "REV":
+            chassis.drive_reverse()
+        elif req == "FWD":
+            chassis.drive_forward() if (not too_close or ign) else chassis.stop_drive()
+        elif req == "LEFT":
+            chassis.turn_left() if (not too_close or ign) else chassis.stop_drive()
+        elif req == "RIGHT":
+            chassis.turn_right() if (not too_close or ign) else chassis.stop_drive()
         else:
-            stop_arm()
-        try:
-            data, _ = sock.recvfrom(1024)
-            if len(data) >= 3 and data[0] == FRAME_START and data[2] == FRAME_END:
-                handle_payload(data[1])
-                last_rx = time.time()
-        except socket.timeout:
-            if time.time() - last_rx > SILENCE_STOP_SEC: stop_drive()
-        time.sleep(CONTROL_PERIOD_SEC)
+            chassis.stop_drive()
+        _drive_hist = [_drive_hist[1], req]
+    _prev_f = f;
+    last_rx = time.time()
 
 
 def run_ssh_control():
     def getch():
-        fd = sys.stdin.fileno()
+        fd = sys.stdin.fileno();
         old = termios.tcgetattr(fd)
         try:
-            tty.setraw(fd)
-            return sys.stdin.read(1)
+            tty.setraw(fd); return sys.stdin.read(1)
         finally:
             termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
+    print("WASD=Drive, R/F=Arm, O/C=Claw, Z=Auto, Q=Quit")
     while True:
-        ultrasonic_tick()
+        chassis.ultrasonic_tick()
         c = getch().lower()
         if c == 'w':
-            drive_forward()
+            chassis.drive_forward()
         elif c == 's':
-            drive_reverse()
+            chassis.drive_reverse()
         elif c == 'a':
-            turn_left()
+            chassis.turn_left()
         elif c == 'd':
-            turn_right()
+            chassis.turn_right()
         elif c == 'r':
-            run_arm(True)
+            arm.run(True)
         elif c == 'f':
-            run_arm(False)
+            arm.run(False)
         elif c == 'o':
-            servo_move_step(0)
+            gripper.move_step(0)
         elif c == 'c':
-            servo_move_step(1)
+            gripper.move_step(1)
         elif c == 'z':
             bring_bottle_xz()
         elif c == ' ' or c == 'k':
-            stop_drive();
-            stop_arm()
+            chassis.stop_drive(); arm.stop()
         elif c == 'q':
             break
-        time.sleep(0.05)
 
 
 if __name__ == "__main__":
     try:
-        init_vision(LEFT_CAM_PATH, RIGHT_CAM_PATH, CALIBRATION_FILE_PATH)
-        init_gripper(factory)
-        init_arm(factory)
-        init_chassis(factory, pi_enc)
-        mode = input("Use Keyboard? (y/n)\n").lower()
-        if mode == "y":
+        vision.init(LEFT_CAM_PATH, RIGHT_CAM_PATH, CALIBRATION_FILE_PATH)
+        gripper.init(factory);
+        arm.init(factory);
+        chassis.init(factory, pi_enc)
+        if input("Use Keyboard? (y/n)\n").lower() == "y":
             run_ssh_control()
         else:
-            run_glove_loop()
-    except KeyboardInterrupt:
-        pass
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM);
+            sock.bind(("0.0.0.0", 4210));
+            sock.settimeout(0.02)
+            while True:
+                chassis.ultrasonic_tick()
+                if _arm_dir != 0:
+                    arm.run(_arm_dir == 1)
+                else:
+                    arm.stop()
+                try:
+                    data, _ = sock.recvfrom(1024)
+                    if len(data) >= 3 and data[0] == 0xAA and data[2] == 0x55: handle_payload(data[1])
+                except socket.timeout:
+                    if time.time() - last_rx > 0.7: chassis.stop_drive()
     finally:
-        stop_drive();
-        shutdown_vision();
+        chassis.stop_drive();
+        vision.shutdown();
         GPIO.cleanup()
