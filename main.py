@@ -7,7 +7,6 @@ Handles UDP Glove commands, Ultrasonic Collision Avoidance, and YOLO Vision.
 """
 
 import os
-
 # Setting environment variables must happen before pigpio is imported
 os.environ['PIGPIO_ADDR'] = 'localhost'
 
@@ -24,6 +23,9 @@ import RPi.GPIO as GPIO
 from gpiozero import PWMOutputDevice, Servo
 from gpiozero.pins.pigpio import PiGPIOFactory
 from ultralytics import YOLO
+import sys
+import tty
+import termios
 
 # ============================================================
 # CONSTANTS & CONFIGURATION
@@ -702,6 +704,7 @@ def run_glove_loop() -> None:
                 stop_drive()
 
         time.sleep(CONTROL_PERIOD_SEC)
+
 
 # --- Setup Terminal for Instant Keypress ---
 def getch():
