@@ -1,4 +1,9 @@
-import os, cv2, pickle, math, time
+import cv2
+import math
+import os
+import pickle
+import time
+
 import numpy as np
 from ultralytics import YOLO
 
@@ -40,7 +45,7 @@ def init_vision(left_path, right_path, calib_path):
     with open(calib_path, 'rb') as f:
         data = pickle.load(f)
     K1, D1, K2, D2, R, T, _Q = data['cameraMatrix1'], data['distCoeffs1'], data['cameraMatrix2'], data['distCoeffs2'], \
-    data['R'], data['T'], data['Q']
+        data['R'], data['T'], data['Q']
 
     R1, R2, P1, P2, _, _, _ = cv2.stereoRectify(K1, D1, K2, D2, (CAM_WIDTH, CAM_HEIGHT), R, T, alpha=-1)
     _maps_l = cv2.initUndistortRectifyMap(K1, D1, R1, P1, (CAM_WIDTH, CAM_HEIGHT), cv2.CV_32FC1)

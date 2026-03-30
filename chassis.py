@@ -1,5 +1,6 @@
-import time
 import math
+import time
+
 import RPi.GPIO as GPIO
 from gpiozero import PWMOutputDevice
 
@@ -91,7 +92,7 @@ def ultrasonic_tick():
 
 
 def obstacle_too_close():
-    return any(d is not None and d < ULTRA_STOP_CM for d in _last_distances)
+    return any((d is not None) and (d < ULTRA_STOP_CM) for d in _last_distances)
 
 
 def stop_drive():

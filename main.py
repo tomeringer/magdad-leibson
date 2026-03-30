@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
-import os, time, socket, math, sys, tty, termios, pigpio
+import pigpio
+import socket
+import sys
+import termios
+import tty
+
 import RPi.GPIO as GPIO
 from gpiozero.pins.pigpio import PiGPIOFactory
 
-# Import all from modules (simulating flat code)
-from gripper import *
 from arm import *
 from chassis import *
+# Import all from modules (simulating flat code)
+from gripper import *
 from vision import *
 
 os.environ['PIGPIO_ADDR'] = 'localhost'
@@ -145,7 +150,7 @@ def run_glove_loop():
         try:
             data, _ = sock.recvfrom(1024)
             if len(data) >= 3 and data[0] == FRAME_START and data[2] == FRAME_END:
-                handle_payload(data[1]);
+                handle_payload(data[1])
                 last_rx = time.time()
         except socket.timeout:
             if time.time() - last_rx > SILENCE_STOP_SEC: stop_drive()
@@ -184,7 +189,8 @@ def run_ssh_control():
         elif c == 'z':
             bring_bottle_xz()
         elif c == ' ' or c == 'k':
-            stop_drive(); stop_arm()
+            stop_drive();
+            stop_arm()
         elif c == 'q':
             break
         time.sleep(0.05)

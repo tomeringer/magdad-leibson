@@ -1,4 +1,3 @@
-import time
 from gpiozero import Servo
 
 # Constants
@@ -10,6 +9,7 @@ _current_servo_pos = 0.0
 _servo_is_open = True
 servo = None
 
+
 def init_gripper(factory):
     global servo
     servo = Servo(
@@ -19,6 +19,7 @@ def init_gripper(factory):
         max_pulse_width=2.5 / 1000,
         pin_factory=factory
     )
+
 
 def servo_move_step(direction: int) -> None:
     global _current_servo_pos, _servo_is_open
