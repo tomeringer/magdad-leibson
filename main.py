@@ -132,6 +132,8 @@ def run_ssh_control():
             gripper.move_step(1)
         elif c == 'z':
             bring_bottle_xz()
+        elif c == 'p':
+            print(vision.detect_bottle_once())
         elif c == ' ' or c == 'k':
             chassis.stop_drive(); arm.stop()
         elif c == 'q':
