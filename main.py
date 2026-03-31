@@ -33,7 +33,7 @@ last_rx = 0.0
 def get_average_distance():
     dist_l = abs(chassis.enc_left.output_revolutions()) * chassis.WHEEL_CIRCUMFERENCE_CM
     dist_r = abs(chassis.enc_right.output_revolutions()) * chassis.WHEEL_CIRCUMFERENCE_CM
-    return (dist_r + dist_r) / 2.0
+    return (dist_l + dist_l) / 2.0
 
 
 def drive_arc(target_x, target_z):
