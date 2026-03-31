@@ -142,10 +142,10 @@ def run_ssh_control():
 
 if __name__ == "__main__":
     try:
-        vision.init(LEFT_CAM_PATH, RIGHT_CAM_PATH, CALIBRATION_FILE_PATH)
+        chassis.init(factory, pi_enc)
         gripper.init(factory);
         arm.init(factory);
-        chassis.init(factory, pi_enc)
+        vision.init(LEFT_CAM_PATH, RIGHT_CAM_PATH, CALIBRATION_FILE_PATH)
         if input("Use Keyboard? (y/n)\n").lower() == "y":
             run_ssh_control()
         else:
