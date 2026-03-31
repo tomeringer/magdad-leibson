@@ -104,7 +104,7 @@ def hard_reset_usb_all() -> None:
         print(f"[ERROR] Could not perform USB reset: {e}")
 
 
-def init_vision() -> None:
+def init() -> None:
     global _vision_ready, _model, _cap_l, _cap_r, _maps_l, _maps_r, _Q
     if _vision_ready:
         return
@@ -188,7 +188,7 @@ def detect_bottle_once() -> dict:
     }
 
 
-def shutdown_vision() -> None:
+def shutdown() -> None:
     global _cap_l, _cap_r
     if _cap_l is not None: _cap_l.release()
     if _cap_r is not None: _cap_r.release()

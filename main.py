@@ -46,7 +46,7 @@ def drive_arc(target_x, target_z):
     # Call through chassis namespace
     chassis.RIGHT_RPWM.value, chassis.LEFT_RPWM.value = v_r * ARC_SPEED_DIFF_FACTOR, v_l
     chassis.RIGHT_LPWM.value = chassis.LEFT_LPWM.value = 0.0
-    chassis.enc_left.zero();
+    chassis.enc_left.zero()
     chassis.enc_right.zero()
     while get_average_distance() < total_arc: time.sleep(0.01)
     chassis.stop_drive()
@@ -59,8 +59,8 @@ def bring_bottle_xz():
         res = vision.detect_bottle_once()
         if res["found"]:
             drive_arc(res['X'], res['Z'])
-            time.sleep(0.3);
-            gripper.move_step(1);
+            time.sleep(0.3)
+            gripper.move_step(1)
             return
         time.sleep(0.1)
 
@@ -69,8 +69,8 @@ def handle_payload(payload):
     global _arm_dir, _prev_f, _drive_hist, _ignore_ultra, last_rx
     f = [(payload >> (4 + i)) & 1 for i in range(4)]
     if all(f) and not all(_prev_f):
-        chassis.stop_drive();
-        arm.stop();
+        chassis.stop_drive()
+        arm.stop()
         bring_bottle_xz()
     else:
         if f[3] and not _prev_f[3]: gripper.move_step(1)
@@ -97,13 +97,13 @@ def handle_payload(payload):
         else:
             chassis.stop_drive()
         _drive_hist = [_drive_hist[1], req]
-    _prev_f = f;
+    _prev_f = f
     last_rx = time.time()
 
 
 def run_ssh_control():
     def getch():
-        fd = sys.stdin.fileno();
+        fd = sys.stdin.fileno()
         old = termios.tcgetattr(fd)
         try:
             tty.setraw(fd); return sys.stdin.read(1)
@@ -143,14 +143,14 @@ def run_ssh_control():
 if __name__ == "__main__":
     try:
         chassis.init(factory, pi_enc)
-        gripper.init(factory);
-        arm.init(factory);
-        vision.init(LEFT_CAM_PATH, RIGHT_CAM_PATH, CALIBRATION_FILE_PATH)
+        gripper.init(factory)
+        arm.init(factory)
+        vision.init()
         if input("Use Keyboard? (y/n)\n").lower() == "y":
             run_ssh_control()
         else:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM);
-            sock.bind(("0.0.0.0", 4210));
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.bind(("0.0.0.0", 4210))
             sock.settimeout(0.02)
             while True:
                 chassis.ultrasonic_tick()
@@ -164,6 +164,6 @@ if __name__ == "__main__":
                 except socket.timeout:
                     if time.time() - last_rx > 0.7: chassis.stop_drive()
     finally:
-        chassis.stop_drive();
-        vision.shutdown();
+        chassis.stop_drive()
+        vision.shutdown()
         GPIO.cleanup()

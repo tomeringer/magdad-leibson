@@ -65,8 +65,8 @@ def ultrasonic_tick():
     now = time.time()
     if now - _last_ultra_t >= ULTRA_MEASURE_PERIOD_SEC:
         _last_ultra_t = now
-        GPIO.output(US1_TRIG, True);
-        time.sleep(0.00001);
+        GPIO.output(US1_TRIG, True)
+        time.sleep(0.00001)
         GPIO.output(US1_TRIG, False)
         t0 = time.time()
         while GPIO.input(US1_ECHO) == 0 and time.time() - t0 < US_TIMEOUT_SEC: pass
@@ -74,8 +74,8 @@ def ultrasonic_tick():
         while GPIO.input(US1_ECHO) == 1 and time.time() - ps < US_TIMEOUT_SEC: pass
         d1 = (time.time() - ps) * SPEED_OF_SOUND_DIVISOR if time.time() - ps < US_TIMEOUT_SEC else None
 
-        GPIO.output(US2_TRIG, True);
-        time.sleep(0.00001);
+        GPIO.output(US2_TRIG, True)
+        time.sleep(0.00001)
         GPIO.output(US2_TRIG, False)
         t0 = time.time()
         while GPIO.input(US2_ECHO) == 0 and time.time() - t0 < US_TIMEOUT_SEC: pass

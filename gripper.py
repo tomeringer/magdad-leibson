@@ -1,4 +1,3 @@
-import time
 from gpiozero import Servo
 
 SERVO_PIN = 12
@@ -12,7 +11,6 @@ def init(factory):
     global servo_obj
     servo_obj = Servo(
         SERVO_PIN,
-        initial_value=None,
         min_pulse_width=0.5 / 1000,
         max_pulse_width=2.5 / 1000,
         pin_factory=factory
