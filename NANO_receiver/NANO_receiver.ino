@@ -62,33 +62,14 @@ void loop() {
         else { error = true; break; }
       }
 
-      if (!error) {
-        // וידוא ביט ההתחלה ('1')
-        if ((receivedVal >> 8) & 1) { 
-          uint8_t finalData = receivedVal & 0xFF; 
-
-          // סינון הדפסות כפולות מהשידור המשולש
-          if (finalData != lastReceivedVal || (millis() - lastReceiveTime > 200)) {
-            
-            // --- קליטה מוצלחת! ---
-            digitalWrite(GREEN_LED, HIGH); // הדלקת נורה ירוקה
-            digitalWrite(RED_LED, LOW);    // כיבוי אדומה
-            
-            if (!isConnected) {
-              Serial.println("\n>>> Connection Restored! <<<");
-              isConnected = true;
-            }
-            
-            Serial.print("SUCCESS! Binary: ");
-            for (int i = 7; i >= 0; i--) {
-              Serial.print((finalData >> i) & 1);
-            }
-            Serial.print(" | Decimal: ");
-            Serial.println(finalData);
-            
-            lastReceivedVal = finalData;
-            lastReceiveTime = millis();
-          }
+      if (!error && ((receivedVal >> 8) & 1)) {
+        uint8_t finalData = receivedVal & 0xFF;
+        if (finalData != lastReceivedVal || (millis() - lastReceiveTime > 200)) {
+          // Output for Python script
+          Serial.write(finalData);
+          
+          lastReceivedVal = finalData;
+          lastReceiveTime = millis();
         }
       }
     }
