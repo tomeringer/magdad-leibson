@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-import os, time, socket, math, sys, tty, termios, pigpio
+import os, time, math, sys, tty, termios, pigpio
 import RPi.GPIO as GPIO
+import serial
 from gpiozero.pins.pigpio import PiGPIOFactory
 
 # Import as namespaces to avoid NoneType copy errors
@@ -149,20 +150,20 @@ if __name__ == "__main__":
         if input("Use Keyboard? (y/n)\n").lower() == "y":
             run_ssh_control()
         else:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            sock.bind(("0.0.0.0", 4210))
-            sock.settimeout(0.02)
+            ser = serial.Serial('/dev/ttyUSB0', 115200, timeout=0.02)
             while True:
                 chassis.ultrasonic_tick()
                 if _arm_dir != 0:
                     arm.run(_arm_dir == 1)
                 else:
                     arm.stop()
-                try:
-                    data, _ = sock.recvfrom(1024)
-                    if len(data) >= 3 and data[0] == 0xAA and data[2] == 0x55: handle_payload(data[1])
-                except socket.timeout:
-                    if time.time() - last_rx > 0.7: chassis.stop_drive()
+                if ser.in_waiting > 0:
+                    data = ser.read(1)
+                    handle_payload(data[0])  # Send byte to existing handler
+                    last_rx = time.time()
+
+                if time.time() - last_rx > 0.7:
+                    chassis.stop_drive()
     finally:
         chassis.stop_drive()
         vision.shutdown()
