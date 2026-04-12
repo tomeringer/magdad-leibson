@@ -162,8 +162,10 @@ if __name__ == "__main__":
                     handle_payload(data[0])  # Send byte to existing handler
                     last_rx = time.time()
 
-                if time.time() - last_rx > 0.7:
+                if time.time() - last_rx > 0.3:
                     chassis.stop_drive()
+                    arm.stop()
+                    print("Communication lost!")
     finally:
         chassis.stop_drive()
         vision.shutdown()
