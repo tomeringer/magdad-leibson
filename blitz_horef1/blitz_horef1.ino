@@ -1,8 +1,6 @@
 #include <Wire.h>
 #include <ICM_20948.h>
-#include <WiFi.h>
-#include <WiFiUdp.h>
-#include <ESPmDNS.h>
+#include "driver/rmt.h" // Added for Antenna System [cite: 1]
 
 // ========================================================
 //          BYTE → BINARY PRINT (עבור הדיבאג)
@@ -18,16 +16,9 @@
   ((byte) & 0x02 ? '1' : '0'), \
   ((byte) & 0x01 ? '1' : '0')
 
-// ========================================================
-//                  NETWORK SETUP
-// ========================================================
-const char* ssid = "YP";
-const char* password = "ptyair101";
-const char* piHostname = "libsonpi";
-const int udpPort = 4210;
-
-WiFiUDP udp;
-IPAddress resolvedPiIP;
+// RMT Configuration for Transmitter [cite: 1, 3, 4]
+#define TX_PIN 5 
+#define HALF_BIT 500
 
 constexpr uint8_t START_BYTE = 0xAA;
 constexpr uint8_t END_BYTE   = 0x55;
@@ -165,6 +156,27 @@ uint8_t encodeAxis(float angle, float th) {
   return 0b00;
 }
 
+void transmitManchester(uint8_t data) {
+  rmt_item32_t items[45]; 
+  int idx = 0;
+  // Preamble & Sync [cite: 7, 8]
+  for(int i = 0; i < 8; i++) items[idx++] = {{{ 400, 1, 400, 0 }}};
+  items[idx++] = {{{ 1000, 1, 1000, 0 }}};
+  // Start Bit [cite: 9]
+  items[idx++] = {{{ HALF_BIT, 1, HALF_BIT, 0 }}};
+  // Payload [cite: 10, 11]
+  for (int i = 7; i >= 0; i--) {
+    if ((data >> i) & 1) items[idx++] = {{{ HALF_BIT, 1, HALF_BIT, 0 }}};
+    else items[idx++] = {{{ HALF_BIT, 0, HALF_BIT, 1 }}};
+  }
+  items[idx++] = {{{ 0, 0, 0, 0 }}}; // End Pulse [cite: 12]
+  // Triple broadcast for reliability 
+  for(int r = 0; r < 3; r++) {
+    rmt_write_items(RMT_CHANNEL_0, items, idx, true);
+    delay(15); 
+  }
+}
+
 // ========================================================
 //                          SETUP
 // ========================================================
@@ -188,30 +200,18 @@ void setup() {
   ori.yaw = magYaw(mag, ori.roll, ori.pitch);
   ref = ori;
 
-  WiFi.begin(ssid, password);
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-  Serial.println("\nWiFi Connected!");
+  rmt_config_t config;
+  config.rmt_mode = RMT_MODE_TX;
+  config.channel = RMT_CHANNEL_0;
+  config.gpio_num = (gpio_num_t)TX_PIN;
+  config.mem_block_num = 1;
+  config.clk_div = 80; 
+  config.tx_config.loop_en = false;
+  config.tx_config.idle_output_en = true;
+  config.tx_config.idle_level = RMT_IDLE_LEVEL_LOW;
+  rmt_config(&config);
+  rmt_driver_install(config.channel, 0, 0);
 
-  Serial.print("ESP IP: ");
-  Serial.println(WiFi.localIP());
-
-  MDNS.begin("esp32-glove");
-  resolvedPiIP = MDNS.queryHost(piHostname);
-  while (resolvedPiIP.toString() == "0.0.0.0") {
-    delay(1000);
-    resolvedPiIP = MDNS.queryHost(piHostname);
-    Serial.println("Resolving Pi IP...");
-  }
-
-  Serial.print("Resolved Pi IP: ");
-  Serial.println(resolvedPiIP);
-  Serial.print("UDP destination port: ");
-  Serial.println(udpPort);
-
-  udp.begin(udpPort);
   lastTime = micros();
 }
 
@@ -251,13 +251,6 @@ void loop() {
 
     bool isZeroPacket = (dataByte == 0x00);
 
-    // שליחה ב-UDP
-    if (!(isZeroPacket && lastPacketWasZero)) {
-      uint8_t buf[3] = { START_BYTE, dataByte, END_BYTE };
-      udp.beginPacket(resolvedPiIP, udpPort);
-      udp.write(buf, sizeof(buf));
-      udp.endPacket();
-      lastPacketWasZero = isZeroPacket;
-    }
+    transmitManchester(dataByte);
   }
 }
