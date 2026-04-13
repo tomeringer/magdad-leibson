@@ -31,7 +31,7 @@ from ultralytics import YOLO
 # --- System & Operation Mode ---
 DEBUG_MODE = True
 CONTROL_PERIOD_SEC = 0.01
-BOTTLE_SEARCH_TIMEOUT_SEC = 10.0  # Maximum time to look for the bottle before aborting
+BOTTLE_SEARCH_TIMEOUT_SEC = 5.0  # Maximum time to look for the bottle before aborting
 
 # --- UDP Network Config ---
 UDP_LISTEN_IP = "0.0.0.0"
@@ -505,8 +505,6 @@ def drive_arc(target_x: float, target_z: float) -> None:
     stop_drive()
 
 def bring_bottle_xz() -> None:
-    time.sleep(2)
-    
     z0 = Z0_STOP_DISTANCE_CM 
     t0 = time.perf_counter()
     found_bottle = {"found": False}
@@ -528,9 +526,8 @@ def bring_bottle_xz() -> None:
 
     drive_arc(found_bottle['X'], found_bottle['Z'])
     print("Arrived at bottle location via arc.")
-    time.sleep(0.5)
+    time.sleep(0.3)
     servo_move_step(1)
-    time.sleep(1)
 
 # ============================================================
 # MAIN GLOVE LOOP
@@ -549,6 +546,10 @@ def handle_payload(payload: int) -> None:
     # ---- Autonomy Trigger ----
     if (f0 == 1 and f1 == 1 and f2 == 1 and f3 == 1) and not (_prev_f0 == 1 and _prev_f1 == 1 and _prev_f2 == 1 and _prev_f3 == 1):
         bring_bottle_xz()
+        # Update history immediately so edge detection doesn't trigger unexpectedly
+        _prev_f0, _prev_f1, _prev_f2, _prev_f3 = f0, f1, f2, f3
+        # Stop processing this specific packet, wait for the next one
+        return
 
     # ---- Servo Edge Detection ----
     if f3 == 1 and _prev_f3 == 0:
