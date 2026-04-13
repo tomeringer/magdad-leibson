@@ -1,10 +1,17 @@
 from gpiozero import Servo
 
 SERVO_PINS = [12, 4, 17, 27 ,22]  # From left to right. TODO: Update according to actual servos
-SERVO_MOVE_STEP = 0.39
+SERVO_MOVE_STEP = -0.144
+servo_offsets = [
+    (80 - 90) / 90,   # -0.111
+    (85 - 90) / 90,   # -0.055
+    (120 - 90) / 90,  #  0.333
+    (90 - 90) / 90,   #  0.0
+    (80 - 90) / 90    # -0.111
+]
 
-_current_servos_pos = [0.0, 0.0, 0.0, 0.0, 0.0]
-_servos_states = [1, 1, 1, 1, 1]
+_current_servos_pos = servo_offsets.copy()
+_servos_states = [0, 0, 0, 0, 0]
 servos = []
 
 def init(factory):
