@@ -16,12 +16,6 @@
   ((byte) & 0x01 ? '1' : '0')
 
 // ========================================================
-//                  PACKET CONSTANTS
-// ========================================================
-constexpr uint8_t START_BYTE = 0xAA;
-constexpr uint8_t END_BYTE   = 0x55;
-
-// ========================================================
 //                  IMU SETUP
 // ========================================================
 ICM_20948_I2C imu;
@@ -51,23 +45,28 @@ constexpr float MAG_SCALE_Z = 1.0f;
 // ========================================================
 //         FLEX SENSORS & STATISTICAL THRESHOLDS
 // ========================================================
-constexpr int NUM_FLEX = 5; // Updated to 5 fingers
-int flexPins[NUM_FLEX] = {A0, A2, A1, A3, A7}; // Added A7
-float R_FIXED[NUM_FLEX]  = {47000, 47000, 47000, 47000, 47000};
-constexpr float V_IN = 3.3;
+constexpr int NUM_FLEX = 5; 
+int flexPins[NUM_FLEX] = {A0, A2, A1, A3, A7}; 
+float R_FIXED[NUM_FLEX]  = {47000.0f, 47000.0f, 47000.0f, 47000.0f, 47000.0f};
+constexpr float V_IN = 3.3f;
 float flexR[NUM_FLEX];
 
-// Statistically calculated Thresholds and Hysteresis
+// Statistically calculated Thresholds
 float THRESHOLDS[NUM_FLEX][3] = {
-  {37002.4f, 45115.9f, 59251.9f},
-  {18688.8f, 22531.8f, 32348.2f},
-  {19430.9f, 26701.9f, 40450.2f},
-  {25493.6f, 30308.9f, 38821.2f},
-  {12044.7f, 14235.7f, 19452.4f}
+  {38406.8f, 49937.3f, 75488.9f},
+  {20396.7f, 27556.0f, 44790.9f},
+  {22969.2f, 30980.6f, 47308.5f},
+  {28157.5f, 32627.5f, 42820.8f},
+  {13922.7f, 17090.8f, 26576.7f}
 };
 
-float HYSTERESIS[NUM_FLEX] = {
-  1120.3f, 573.9f, 581.9f, 857.6f, 275.0f
+// Expanded Hysteresis Matrix 
+float HYSTERESIS[NUM_FLEX][3] = {
+  {1878.9f, 9429.3f, 14966.5f},
+  {1488.4f, 5537.5f, 11153.6f},
+  {3367.6f, 3961.3f, 12128.7f},
+  {3310.0f,  935.5f,  9082.1f},
+  { 927.4f, 2185.0f,  7134.9f}
 };
 
 // Memory array for the state machine
@@ -131,7 +130,7 @@ void updateOrientation(float dt, Vec3 &acc, Vec3 &gyr, Vec3 &mag) {
 // ========================================================
 //    FLEX DETECTION (WITH HYSTERESIS STATE MACHINE)
 // ========================================================
-uint16_t readFlexBits() { // Changed to uint16_t to hold 10 bits
+uint16_t readFlexBits() { 
   uint16_t flexData = 0;
   Serial.print("(r0, r1, r2, r3, r4)=(");
   
@@ -149,12 +148,17 @@ uint16_t readFlexBits() { // Changed to uint16_t to hold 10 bits
     }
     flexR[i] = r;
 
-    // Hysteresis State Machine Evaluation
-    float h = HYSTERESIS[i];
+    // Hysteresis State Machine Evaluation (2D Matrix update)
     int s = currentStates[i];
 
-    while (s < 3 && r > (THRESHOLDS[i][s] + h)) s++;
-    while (s > 0 && r < (THRESHOLDS[i][s - 1] - h)) s--;
+    // Look UP a state, using the hysteresis for the current gap
+    while (s < 3 && r > (THRESHOLDS[i][s] + HYSTERESIS[i][s])) {
+        s++;
+    }
+    // Look DOWN a state, using the hysteresis for the gap below
+    while (s > 0 && r < (THRESHOLDS[i][s - 1] - HYSTERESIS[i][s - 1])) {
+        s--;
+    }
     
     currentStates[i] = s;
     
@@ -220,28 +224,33 @@ void loop() {
     float relRoll  = wrapAngle(ori.roll  - ref.roll);
     float relPitch = wrapAngle(ori.pitch - ref.pitch);
 
-    uint16_t flexData = readFlexBits(); // Now 16 bits
+    uint16_t flexData = readFlexBits(); // 10 bits used 
     uint8_t rollBits = encodeAxis(relRoll,  ROLL_TH);
     uint8_t pitchBits = encodeAxis(relPitch, PITCH_TH);
-    uint8_t imuByte = (rollBits << 2) | pitchBits;
+    uint8_t imuByte = (rollBits << 2) | pitchBits; // 4 bits used
 
-    // Split the 16-bit flex data into two 8-bit bytes for visual debugging
-    uint8_t flexHigh = (flexData >> 8) & 0xFF;
-    uint8_t flexLow  = flexData & 0xFF;
+    // Split the 16-bit flex data
+    // Masking with 0x03 ensures we only grab the top 2 bits (Finger 4)
+    uint8_t flexHigh = (flexData >> 8) & 0x03; 
+    uint8_t flexLow  = flexData & 0xFF; // Bottom 8 bits (Fingers 0-3)
 
-    // --- 1. Print Raw Binary Data ---
-    Serial.print("RAW -> [START: "); Serial.printf(BYTE_TO_BINARY_PATTERN, BYTE_TO_BINARY(START_BYTE)); Serial.print("] ");
-    Serial.print("[FLEX_H: ");  Serial.printf(BYTE_TO_BINARY_PATTERN, BYTE_TO_BINARY(flexHigh));   Serial.print("] ");
-    Serial.print("[FLEX_L: ");  Serial.printf(BYTE_TO_BINARY_PATTERN, BYTE_TO_BINARY(flexLow));    Serial.print("] ");
-    Serial.print("[IMU: ");   Serial.printf(BYTE_TO_BINARY_PATTERN, BYTE_TO_BINARY(imuByte));    Serial.print("] ");
-    Serial.print("[END: ");   Serial.printf(BYTE_TO_BINARY_PATTERN, BYTE_TO_BINARY(END_BYTE));   Serial.print("]\n");
+    // --- MERGE FLEX_H AND IMU ---
+    // Shift flexHigh to bits 4 and 5, and insert imuByte into bits 0 to 3
+    uint8_t mergedByte = (flexHigh << 4) | imuByte;
+
+    // --- 1. Print Raw Binary Data (START/END bytes removed) ---
+    Serial.print("RAW -> [MERGED_FLEX_H_IMU: ");  
+    Serial.printf(BYTE_TO_BINARY_PATTERN, BYTE_TO_BINARY(mergedByte));   
+    Serial.print("] [FLEX_L: ");  
+    Serial.printf(BYTE_TO_BINARY_PATTERN, BYTE_TO_BINARY(flexLow));    
+    Serial.print("]\n");
 
     // --- 2. Parse and Print Human-Readable Data ---
     uint8_t f0 = flexData & 0x03;          
     uint8_t f1 = (flexData >> 2) & 0x03;   
     uint8_t f2 = (flexData >> 4) & 0x03;   
     uint8_t f3 = (flexData >> 6) & 0x03;   
-    uint8_t f4 = (flexData >> 8) & 0x03; // The new 5th finger
+    uint8_t f4 = (flexData >> 8) & 0x03; 
 
     Serial.print("PARSED -> Fingers (F4,F3,F2,F1,F0): ");
     Serial.print(f4); Serial.print(", ");
