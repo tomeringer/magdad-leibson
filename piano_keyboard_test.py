@@ -1,6 +1,9 @@
 import sys
 import tty
 import termios
+
+from gpiozero.pins.pigpio import PiGPIOFactory
+
 import piano_player as piano
 
 
@@ -17,7 +20,7 @@ def run_piano_control():
         return ch
 
     # Initialize hardware (using None for default factory)
-    piano.init(None)
+    piano.init(PiGPIOFactory())
 
     # We keep track of the toggle state for each finger
     current_states = [0, 0, 0, 0, 0]
