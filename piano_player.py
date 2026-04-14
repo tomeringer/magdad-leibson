@@ -3,7 +3,8 @@ from gpiozero import Servo
 SERVO_PINS = [12, 4, 17, 27, 22]
 
 # Exact same arrays as your working ESP32 code
-SERVO_OFFSETS = [80, 85, 120, 90, 80]
+SERVO_OFFSETS = [90, 80, 85, 120, 80]
+# SERVO_OFFSETS = [80, 85, 120, 90, 80]
 SERVO_STATES = [0, -13, -27, -40]
 
 servos = []
