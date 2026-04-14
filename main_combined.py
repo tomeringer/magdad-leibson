@@ -208,80 +208,140 @@ def handle_hand_payload(merged_byte, flex_low):
     print(f"\r[RX] RollBits: {rollBits:02b} | PitchBits: {pitchBits:02b} | Flex: {[f0, f1, f2, f3, f4]} | DriveCmd: {req} | TooClose: {too_close} | IgnoringUltra: {ign}      ", end="")
 
 
+def run_hand_ssh_control():
+    def getch():
+        fd = sys.stdin.fileno()
+        old = termios.tcgetattr(fd)
+        try:
+            tty.setraw(fd); return sys.stdin.read(1)
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old)
+
+    print("WASD=Drive, 1-5=Cycle Fingers (0-3), Space/K=Stop, Q=Quit")
+    fingers = [0, 0, 0, 0, 0]
+    
+    while True:
+        chassis.ultrasonic_tick()
+        c = getch().lower()
+        
+        if c == 'w':
+            chassis.drive_forward()
+        elif c == 's':
+            chassis.drive_reverse()
+        elif c == 'a':
+            chassis.turn_left()
+        elif c == 'd':
+            chassis.turn_right()
+        elif c in ['1', '2', '3', '4', '5']:
+            idx = int(c) - 1
+            # Cycle the specific finger state: 0 -> 1 -> 2 -> 3 -> 0
+            fingers[idx] = (fingers[idx] + 1) % 4
+            piano_player.set_states(fingers)
+            print(f"\rFingers state updated: {fingers}        ", end="")
+        elif c == ' ' or c == 'k':
+            chassis.stop_drive()
+        elif c == 'q':
+            break
+
 # ========================================================
 # MAIN EXECUTION
 # ========================================================
-
 if __name__ == "__main__":
     try:
-        # Prompt the user to select the end effector mode
-        mode = input("Select mode: GRIPPER or HAND? (g/h)\n").strip().lower()
+        # Main loop to keep the program running and ask for mode repeatedly
+        while True:
+            mode = input("\nSelect mode: GRIPPER or HAND? (g/h/q to quit)\n").strip().lower()
 
-        if mode == "g":
-            # Initialize components for gripper mode
-            chassis.init(factory, pi_enc)
-            gripper.init(factory)
-            arm.init(factory)
-            vision.init()
-            
-            if input("Use Keyboard? (y/n)\n").lower() == "y":
-                run_ssh_control()
-            else:
-                sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                sock.bind(("0.0.0.0", 4210))
-                sock.settimeout(0.02)
-                while True:
-                    chassis.ultrasonic_tick()
-                    if _arm_dir != 0:
-                        arm.run(_arm_dir == 1)
-                    else:
-                        arm.stop()
-                    try:
-                        data, _ = sock.recvfrom(1024)
-                        if len(data) >= 3 and data[0] == 0xAA and data[2] == 0x55: handle_payload(data[1])
-                    except socket.timeout:
-                        if time.time() - last_rx > 0.7: chassis.stop_drive()
-                        
-        elif mode == "h":
-            # Initialize components for hand mode
-            chassis.init(factory, pi_enc)
-            piano_player.init(factory)
-            
-            print(f"[NETWORK] Starting UDP Server on {UDP_IP}:{UDP_PORT}...")
-            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            sock.bind((UDP_IP, UDP_PORT))
-            sock.settimeout(0.02)
-            
-            print("[NETWORK] UDP Server initialized successfully.")
-            last_rx = time.time()
-            print("[SYSTEM] Robot Ready. Waiting for raw 2-byte glove commands...")
-            
-            while True:
-                chassis.ultrasonic_tick()
+            if mode == 'q':
+                break # Exit the main loop and proceed to final shutdown
+
+            elif mode == "g":
                 try:
-                    data, addr = sock.recvfrom(1024)                    
-                    if len(data) >= 2:
-                        handle_hand_payload(data[0], data[1])  
-                except socket.timeout:
-                    # If no packet arrives for 0.7 seconds, halt the robot
-                    if time.time() - last_rx > 0.7: 
-                        chassis.stop_drive()                    
-        else:
-            print("Invalid input. Please run the script again and select either 'gripper' or 'hand'.")
+                    # Initialize components for gripper mode
+                    chassis.init(factory, pi_enc)
+                    gripper.init(factory)
+                    arm.init(factory)
+                    vision.init()
+                    
+                    if input("Use Keyboard? (y/n)\n").lower() == "y":
+                        run_ssh_control()
+                    else:
+                        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                        sock.bind(("0.0.0.0", 4210))
+                        sock.settimeout(0.02)
+                        while True:
+                            chassis.ultrasonic_tick()
+                            if _arm_dir != 0:
+                                arm.run(_arm_dir == 1)
+                            else:
+                                arm.stop()
+                            try:
+                                data, _ = sock.recvfrom(1024)
+                                if len(data) >= 3 and data[0] == 0xAA and data[2] == 0x55: 
+                                    handle_payload(data[1])
+                            except socket.timeout:
+                                if time.time() - last_rx > 0.7: chassis.stop_drive()
+                except KeyboardInterrupt:
+                    print("\n[INFO] Returning to main menu...")
+                except Exception as e:
+                    print(f"[ERROR] An error occurred in GRIPPER mode: {e}")
+                finally:
+                    # Cleanup specific to gripper mode before looping back
+                    chassis.stop_drive()
+                    try: sock.close()
+                    except Exception: pass
+                        
+            elif mode == "h":
+                try:
+                    # Initialize components for hand mode
+                    chassis.init(factory, pi_enc)
+                    piano_player.init(factory)
+
+                    if input("Use Keyboard? (y/n)\n").lower() == "y":
+                        run_hand_ssh_control()
+                    else: 
+                        print(f"[NETWORK] Starting UDP Server on {UDP_IP}:{UDP_PORT}...")
+                        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                        sock.bind((UDP_IP, UDP_PORT))
+                        sock.settimeout(0.02)
+                        
+                        print("[NETWORK] UDP Server initialized successfully.")
+                        last_rx = time.time()
+                        print("[SYSTEM] Robot Ready. Waiting for raw 2-byte glove commands...")
+                        
+                        while True:
+                            chassis.ultrasonic_tick()
+                            try:
+                                data, addr = sock.recvfrom(1024)                    
+                                if len(data) >= 2:
+                                    handle_hand_payload(data[0], data[1])  
+                            except socket.timeout:
+                                # If no packet arrives for 0.7 seconds, halt the robot
+                                if time.time() - last_rx > 0.7: 
+                                    chassis.stop_drive()                    
+                except KeyboardInterrupt:
+                    print("\n[INFO] Returning to main menu...")
+                except Exception as e:
+                    print(f"[ERROR] An error occurred in HAND mode: {e}")
+                finally:
+                    # Cleanup specific to hand mode before looping back
+                    chassis.stop_drive()
+                    try: sock.close()
+                    except Exception: pass
+                    
+            else:
+                print("Invalid input. Please select 'g', 'h', or 'q'.")
 
     except KeyboardInterrupt:
-        print("\n[INFO] Interrupted by user. Shutting down...")
+        print("\n[INFO] Interrupted by user. Shutting down completely...")
         
     finally:
+        # Final safe shutdown for the entire system
         chassis.stop_drive()
         try:
             vision.shutdown()
-        except NameError:
+        except Exception:
             pass # In case vision wasn't initialized 
-        try:
-            sock.close()
-        except NameError:
-            pass # In case socket wasn't initialized
             
         GPIO.cleanup()
         print("[SYSTEM] Safely powered down.")
