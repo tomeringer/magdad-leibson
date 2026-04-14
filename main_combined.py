@@ -290,6 +290,7 @@ if __name__ == "__main__":
                     chassis.stop_drive()
                     chassis.close_pins()
                     gripper.close_pins()
+                    arm.close_pins()
                     try: sock.close()
                     except Exception: pass
                         
@@ -330,6 +331,7 @@ if __name__ == "__main__":
                     chassis.stop_drive()
                     chassis.close_pins()
                     piano_player.close_pins()
+                    arm.close_pins()
                     try: sock.close()
                     except Exception: pass
                     

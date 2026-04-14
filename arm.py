@@ -37,3 +37,10 @@ def stop() -> None:
     if ARM_RPWM and ARM_LPWM:
         ARM_RPWM.value = 0.0
         ARM_LPWM.value = 0.0
+
+def close_pins():
+    global ARM_RPWM, ARM_LPWM    
+    if ARM_RPWM is not None:
+        ARM_RPWM.close()
+    if ARM_LPWM is not None:
+        ARM_LPWM.close()
