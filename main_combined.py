@@ -258,6 +258,7 @@ if __name__ == "__main__":
             elif mode == "g":
                 try:
                     # Initialize components for gripper mode
+                    GPIO.setmode(GPIO.BCM)
                     chassis.init(factory, pi_enc)
                     gripper.init(factory)
                     arm.init(factory)
@@ -299,6 +300,7 @@ if __name__ == "__main__":
             elif mode == "h":
                 try:
                     # Initialize components for hand mode
+                    GPIO.setmode(GPIO.BCM)
                     chassis.init(factory, pi_enc)
                     piano_player.init(factory)
 
