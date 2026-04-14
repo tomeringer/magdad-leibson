@@ -114,8 +114,6 @@ def main():
 
     print("[SYSTEM] Robot Ready. Waiting for raw 2-byte glove commands...")
 
-
-
     try:
         while True:
             # Continuously check sensors
