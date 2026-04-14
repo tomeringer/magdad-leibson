@@ -1,61 +1,57 @@
 import serial
 import time
 
-# הגדר את הפורט שבו הארדואינו מחובר לפאי
-SERIAL_PORT = '/dev/ttyACM0'  # יכול להיות גם /dev/ttyUSB0
+SERIAL_PORT = '/dev/ttyACM0'
 BAUD_RATE = 115200
+
+def decode_imu(val):
+    if val == 0b01: return "HIGH"
+    if val == 0b10: return "LOW"
+    return "CENTER"
 
 def main():
     print(f"Connecting to Arduino on {SERIAL_PORT}...")
     try:
-        # פתיחת צינור התקשורת
         ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=1)
-        # איפוס קצר כדי שהארדואינו יתאפס בצורה נקייה
         ser.dtr = False
         time.sleep(1)
         ser.reset_input_buffer()
         ser.dtr = True
         
-        print("Ready! Listening for RF packets...\n" + "-"*30)
+        print("Ready! Listening for Array Data...\n" + "="*60)
         
-        expected_counter = None
-
         while True:
-            # אם יש נתונים שמחכים בצינור ה-USB
             if ser.in_waiting > 0:
-                # קרא שורה, נקה רווחים ופענח לטקסט
                 line = ser.readline().decode('utf-8', errors='ignore').strip()
                 
-                # אנחנו מחפשים רק שורות שמתחילות ב-"DATA:" (הפורמט שהגדרנו בארדואינו)
                 if line.startswith("DATA:"):
                     try:
-                        # חילוץ המספר
-                        counter_val = int(line.split(":")[1])
+                        parts = line.split(":")[1].split(",")
+                        b1, b2, b3, b4 = [int(x) for x in parts]
                         
-                        # בדיקה אם דילגנו על חבילות
-                        status = "Perfect"
-                        if expected_counter is not None:
-                            if counter_val != expected_counter:
-                                status = f"MISSED PACKET! Expected {expected_counter}"
+                        # פירוק 5 האצבעות (10 ביטים מ-b1 ו-b2)
+                        flex_data = (b2 << 8) | b1
+                        fingers = [(flex_data >> (i * 2)) & 0x03 for i in range(5)]
                         
-                        print(f"Received Counter: {counter_val:3d} | Status: {status}")
+                        # פירוק סטטוס IMU (4 ביטים מ-b2)
+                        roll_state = decode_imu((b2 >> 2) & 0x03)
+                        pitch_state = decode_imu((b2 >> 4) & 0x03)
+
+                        # שחזור זוויות גולמיות (החסרת 128 שהוספנו ב-ESP)
+                        raw_roll = b3 - 128
+                        raw_pitch = b4 - 128
                         
-                        # חישוב המספר הבא שאנחנו אמורים לקבל (עם חזרה ל-0 אחרי 255)
-                        expected_counter = (counter_val + 1) % 256
+                        print(f"Flex: {fingers} | IMU Roll: {raw_roll:4d}° ({roll_state:6}) | Pitch: {raw_pitch:4d}° ({pitch_state:6})")
                         
-                    except ValueError:
-                        pass # אם הגיע זבל נתעלם
+                    except Exception as e:
+                        pass
                 else:
-                    # הדפסת הודעות מערכת של הארדואינו (כמו "Ready")
-                    print(f"[Arduino Info] {line}")
+                    print(f"[Arduino] {line}")
 
     except serial.SerialException as e:
-        print(f"Serial Error: {e}. Check the USB cable and Port name.")
+        print(f"Serial Error: {e}")
     except KeyboardInterrupt:
-        print("\nStopping script...")
-    finally:
-        if 'ser' in locals() and ser.is_open:
-            ser.close()
+        print("\nStopping...")
 
 if __name__ == '__main__':
     main()
