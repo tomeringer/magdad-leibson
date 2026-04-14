@@ -72,27 +72,28 @@ constexpr unsigned long SEND_PERIOD_MS = 100;
 //         FLEX SENSORS & STATISTICAL THRESHOLDS
 // ========================================================
 constexpr int NUM_FLEX = 5; 
-int flexPins[NUM_FLEX] = {A0, A2, A1, A3, A7}; 
+// REORDERED PINS: f0(A3), f1(A0), f2(A2), f3(A7), f4(A1)
+int flexPins[NUM_FLEX] = {A3, A0, A2, A7, A1}; 
 float R_FIXED[NUM_FLEX]  = {47000.0f, 47000.0f, 47000.0f, 47000.0f, 47000.0f};
 constexpr float V_IN = 3.3f;
 float flexR[NUM_FLEX];
 
-// Statistically calculated Thresholds
+// Statistically calculated Thresholds (Reordered to match new pins)
 float THRESHOLDS[NUM_FLEX][3] = {
-  {38406.8f, 49937.3f, 75488.9f},
-  {20396.7f, 27556.0f, 44790.9f},
-  {22969.2f, 30980.6f, 47308.5f},
-  {28157.5f, 32627.5f, 42820.8f},
-  {13922.7f, 17090.8f, 26576.7f}
+  {28157.5f, 32627.5f, 42820.8f}, // f0 (A3)
+  {38406.8f, 49937.3f, 75488.9f}, // f1 (A0)
+  {20396.7f, 27556.0f, 44790.9f}, // f2 (A2)
+  {13922.7f, 17090.8f, 26576.7f}, // f3 (A7)
+  {22969.2f, 30980.6f, 47308.5f}  // f4 (A1)
 };
 
-// Expanded Hysteresis Matrix 
+// Expanded Hysteresis Matrix (Reordered to match new pins)
 float HYSTERESIS[NUM_FLEX][3] = {
-  {1878.9f, 9429.3f, 14966.5f},
-  {1488.4f, 5537.5f, 11153.6f},
-  {3367.6f, 3961.3f, 12128.7f},
-  {3310.0f,  935.5f,  9082.1f},
-  { 927.4f, 2185.0f,  7134.9f}
+  {3310.0f,  935.5f,  9082.1f},   // f0 (A3)
+  {1878.9f, 9429.3f, 14966.5f},   // f1 (A0)
+  {1488.4f, 5537.5f, 11153.6f},   // f2 (A2)
+  { 927.4f, 2185.0f,  7134.9f},   // f3 (A7)
+  {3367.6f, 3961.3f, 12128.7f}    // f4 (A1)
 };
 
 // Memory array for the state machine
@@ -184,7 +185,7 @@ uint8_t encodeAxis(float angle, float th) {
 void setup() {
   Serial.begin(115200);
   while (!Serial); 
-  Serial.println("Glove System - Full 5-Finger UDP Mode (No Start/End Bytes)");
+  Serial.println("Glove System - Reordered 5-Finger UDP Mode");
 
   Wire.begin();
   Wire.setClock(400000);

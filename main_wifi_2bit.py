@@ -86,7 +86,12 @@ def handle_payload(merged_byte, flex_low):
     else:
         chassis.stop_drive()
         
-    _drive_hist = [_drive_hist[1], req]
+    # FIX: Only update the history buffer if the command actually changed.
+    # This prevents the 10Hz UDP stream from filling the buffer with ["STOP", "STOP"] 
+    # while your hand is resting in neutral.
+    if req != _drive_hist[1]:
+        _drive_hist = [_drive_hist[1], req]
+        
     last_rx = time.time()
 
     # Debug print (can be commented out in production)
