@@ -19,8 +19,8 @@ def init(factory):
     for pin in SERVO_PINS:
         servos.append(Servo(
             pin,
-            min_pulse_width=0.5 / 1000,
-            max_pulse_width=2.5 / 1000,
+            min_pulse_width=1 / 1000,
+            max_pulse_width=2 / 1000,
             pin_factory=factory
         ))
 
