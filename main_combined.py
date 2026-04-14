@@ -288,9 +288,11 @@ if __name__ == "__main__":
                 finally:
                     # Cleanup specific to gripper mode before looping back
                     chassis.stop_drive()
-                    chassis.close_pins()
-                    gripper.close_pins()
-                    arm.close_pins()
+                    # chassis.close_pins()
+                    # gripper.close_pins()
+                    # arm.close_pins()
+                    vision.shutdown()
+                    GPIO.cleanup()
                     try: sock.close()
                     except Exception: pass
                         
@@ -329,9 +331,10 @@ if __name__ == "__main__":
                 finally:
                     # Cleanup specific to hand mode before looping back
                     chassis.stop_drive()
-                    chassis.close_pins()
-                    piano_player.close_pins()
-                    arm.close_pins()
+                    # chassis.close_pins()
+                    # piano_player.close_pins()
+                    # arm.close_pins()
+                    GPIO.cleanup()
                     try: sock.close()
                     except Exception: pass
                     
