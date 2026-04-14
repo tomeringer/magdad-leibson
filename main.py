@@ -151,7 +151,7 @@ if __name__ == "__main__":
         if input("Use Keyboard? (y/n)\n").lower() == "y":
             run_ssh_control()
         else:
-            ser = serial.Serial('/dev/ttyACM0', 115200, timeout=0.02)
+            ser = serial.Serial('/dev/ttyACM0', 115200, timeout=0.2)
             while True:
                 # chassis.ultrasonic_tick()
                 # if _arm_dir != 0:
