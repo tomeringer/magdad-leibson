@@ -1,10 +1,10 @@
 from gpiozero import Servo
 
-SERVO_PINS = [12, 4, 17, 27, 22]
+# Reordered to strictly match Finger 1, Finger 2, Finger 3, Finger 4, Finger 5
+SERVO_PINS = [12, 27, 22, 4, 17]
 
-# Exact same arrays as your working ESP32 code
-SERVO_OFFSETS = [90, 80, 85, 120, 80]
-# SERVO_OFFSETS = [80, 85, 120, 90, 80]
+# Original offsets matched to the new pin order
+SERVO_OFFSETS = [80, 85, 120, 90, 80]
 SERVO_STATES = [0, -13, -27, -40]
 
 servos = []
