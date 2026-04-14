@@ -146,7 +146,6 @@ def detect_bottle_once() -> dict:
 
     results_l = _model.predict(frame_l, conf=YOLO_CONF_THRESHOLD, classes=[BOTTLE_CLASS_ID], verbose=False)
     results_r = _model.predict(frame_r, conf=YOLO_CONF_THRESHOLD, classes=[BOTTLE_CLASS_ID], verbose=False)
-    print("Blah")
 
     X = Y = Z = cx = cy = disparity = conf = None
 
