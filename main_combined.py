@@ -248,6 +248,7 @@ def run_hand_ssh_control():
 # ========================================================
 if __name__ == "__main__":
     try:
+        chassis.init(factory, pi_enc)
         # Main loop to keep the program running and ask for mode repeatedly
         while True:
             mode = input("\nSelect mode: GRIPPER or HAND? (g/h/q to quit)\n").strip().lower()
@@ -258,7 +259,6 @@ if __name__ == "__main__":
             elif mode == "g":
                 try:
                     # Initialize components for gripper mode
-                    chassis.init(factory, pi_enc)
                     gripper.init(factory)
                     arm.init(factory)
                     vision.init()
@@ -294,7 +294,6 @@ if __name__ == "__main__":
             elif mode == "h":
                 try:
                     # Initialize components for hand mode
-                    chassis.init(factory, pi_enc)
                     piano_player.init(factory)
 
                     if input("Use Keyboard? (y/n)\n").lower() == "y":
