@@ -4,7 +4,7 @@ from gpiozero import Servo
 SERVO_PINS = [12, 27, 22, 4, 17]
 
 # Original offsets matched to the new pin order
-SERVO_OFFSETS = [80, 85, 120, 90, 80]
+SERVO_OFFSETS = [80, 90, 80, 85, 120]
 SERVO_STATES = [0, -13, -27, -40]
 
 servos = []
