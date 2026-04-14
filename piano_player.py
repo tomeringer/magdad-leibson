@@ -1,7 +1,9 @@
 from gpiozero import Servo
 
 # Reordered to strictly match Finger 1, Finger 2, Finger 3, Finger 4, Finger 5
-SERVO_PINS = [12, 27, 22, 4, 17]
+# SERVO_PINS = [12, 27, 22, 4, 17]
+SERVO_PINS = [12, 17, 22, 27, 4]  # Updated to match the new pin order
+
 
 # Original offsets matched to the new pin order
 SERVO_OFFSETS = [80, 90, 80, 85, 120]
