@@ -314,9 +314,9 @@ if __name__ == "__main__":
                             else:
                                 arm.stop()
                             try:
-                                data, _ = sock.recvfrom(1024)
-                                if len(data) >= 3 and data[0] == 0xAA and data[2] == 0x55: 
-                                    handle_payload(data[1])
+                                data, addr = sock.recvfrom(1024)
+                                if len(data) >= 2:
+                                    handle_payload(data[0], data[1])
                             except socket.timeout:
                                 if time.time() - last_rx > 0.7: chassis.stop_drive()
                 except KeyboardInterrupt:
