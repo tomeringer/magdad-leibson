@@ -12,7 +12,7 @@ import vision
 os.environ['PIGPIO_ADDR'] = 'localhost'
 
 # Constants
-ARC_STOP_OFFSET_CM, Z0_STOP_DISTANCE_CM = 7.5, 21.0
+ARC_STOP_OFFSET_CM, Z0_STOP_DISTANCE_CM = 4.5, 23
 ARC_MAX_OUTER_SPEED, ARC_SPEED_DIFF_FACTOR = 0.3, 1.06
 LEFT_CAM_PATH = "/dev/v4l/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.4:1.0-video-index0"
 RIGHT_CAM_PATH = "/dev/v4l/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.1:1.0-video-index0"
