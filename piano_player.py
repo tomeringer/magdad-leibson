@@ -42,4 +42,10 @@ def set_states(positions: list[int]) -> None:
 def close_pins():
     global servos
     for servo in servos:
-        servo.close()
+        if servo is not None:
+            servo.detach()  
+    import time
+    time.sleep(0.1)    
+    for servo in servos:
+        if servo is not None:
+            servo.close()

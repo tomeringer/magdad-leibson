@@ -35,4 +35,7 @@ def move_step(direction: int) -> None:
 def close_pins():
     global servo_obj
     if servo_obj is not None:
-        servo_obj.close()
+        servo_obj.detach() 
+        import time
+        time.sleep(0.1)
+        servo_obj.close()  
