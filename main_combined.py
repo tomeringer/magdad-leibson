@@ -258,7 +258,6 @@ if __name__ == "__main__":
             elif mode == "g":
                 try:
                     # Initialize components for gripper mode
-                    GPIO.setmode(GPIO.BCM)
                     chassis.init(factory, pi_enc)
                     gripper.init(factory)
                     arm.init(factory)
@@ -289,18 +288,16 @@ if __name__ == "__main__":
                 finally:
                     # Cleanup specific to gripper mode before looping back
                     chassis.stop_drive()
-                    # chassis.close_pins()
-                    # gripper.close_pins()
-                    # arm.close_pins()
+                    chassis.close_pins()
+                    gripper.close_pins()
+                    arm.close_pins()
                     vision.shutdown()
-                    GPIO.cleanup()
                     try: sock.close()
                     except Exception: pass
                         
             elif mode == "h":
                 try:
                     # Initialize components for hand mode
-                    GPIO.setmode(GPIO.BCM)
                     chassis.init(factory, pi_enc)
                     piano_player.init(factory)
 
@@ -333,10 +330,9 @@ if __name__ == "__main__":
                 finally:
                     # Cleanup specific to hand mode before looping back
                     chassis.stop_drive()
-                    # chassis.close_pins()
-                    # piano_player.close_pins()
-                    # arm.close_pins()
-                    GPIO.cleanup()
+                    chassis.close_pins()
+                    piano_player.close_pins()
+                    arm.close_pins()
                     try: sock.close()
                     except Exception: pass
                     
