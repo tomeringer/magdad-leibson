@@ -71,40 +71,78 @@ def bring_bottle_xz():
             return
         time.sleep(0.1)
 
-def handle_payload(payload):
-    global _arm_dir, _prev_f, _drive_hist, _ignore_ultra, last_rx
-    f = [(payload >> (4 + i)) & 1 for i in range(4)]
+def handle_payload(merged_byte, flex_low):
+    global _drive_hist, _ignore_ultra, last_rx, _arm_dir
+
+    # --- 1. DECODE IMU DATA (From merged_byte) ---
+    rollBits = (merged_byte >> 2) & 0x03
+    pitchBits = merged_byte & 0x03
+
+    # --- 2. DECODE FLEX DATA (From both bytes) ---
+    f4 = (merged_byte >> 4) & 0x03
+
+    f0 = flex_low & 0x03
+    f1 = (flex_low >> 2) & 0x03
+    f2 = (flex_low >> 4) & 0x03
+    f3 = (flex_low >> 6) & 0x03
+
+    f_2b = [f0, f1, f2, f3, f4]
+    f = [0 if (f == 0) or (f == 1) else 1 for f in f_2b]
+
     if all(f) and not all(_prev_f):
         chassis.stop_drive()
         arm.stop()
         bring_bottle_xz()
     else:
-        if f[3] and not _prev_f[3]: gripper.move_step(1)
-        if f[2] and not _prev_f[2]: gripper.move_step(0)
-        _arm_dir = -1 if (f[0] and not f[1]) else 1 if (f[1] and not f[0]) else 0
+        if f[4] and not _prev_f[4]: gripper.move_step(1)
+        if f[0] and not _prev_f[0]: gripper.move_step(0)
+        _arm_dir = -1 if (f[2] and not f[1]) else 1 if (f[1] and not f[2]) else 0
+        if _arm_dir != 0:
+            gripper.move_step(_arm_dir > 1)
 
-        p, r = payload & 0x03, (payload >> 2) & 0x03
-        req = "REV" if p == 1 else "FWD" if p == 2 else "LEFT" if r == 1 else "RIGHT" if r == 2 else "STOP"
+    # --- 3. DRIVE CHASSIS WITH ULTRASONIC SAFETY ---
+    req = "STOP"
+    if pitchBits == 0b01:  # + Pitch
+        req = "FWD"
+    elif pitchBits == 0b10:  # - Pitch
+        req = "REV"
+    elif rollBits == 0b01:  # + Roll
+        req = "RIGHT"
+    elif rollBits == 0b10:  # - Roll
+        req = "LEFT"
 
-        too_close = chassis.obstacle_too_close()
-        if _ignore_ultra[0] and (req in ("STOP", "REV") or req != _ignore_ultra[1]): _ignore_ultra[0] = False
-        if (not _ignore_ultra[0]) and req in {"FWD", "LEFT", "RIGHT"}:
-            if _drive_hist[1] == "STOP" and _drive_hist[0] == req: _ignore_ultra[:] = [True, req]
+    too_close = chassis.obstacle_too_close()
 
-        ign = (_ignore_ultra[0] and req == _ignore_ultra[1])
-        if req == "REV":
-            chassis.drive_reverse()
-        elif req == "FWD":
-            chassis.drive_forward() if (not too_close or ign) else chassis.stop_drive()
-        elif req == "LEFT":
-            chassis.turn_left() if (not too_close or ign) else chassis.stop_drive()
-        elif req == "RIGHT":
-            chassis.turn_right() if (not too_close or ign) else chassis.stop_drive()
-        else:
-            chassis.stop_drive()
+    if _ignore_ultra[0] and (req in ("STOP", "REV") or req != _ignore_ultra[1]):
+        _ignore_ultra[0] = False
+
+    if (not _ignore_ultra[0]) and req in {"FWD", "LEFT", "RIGHT"}:
+        if _drive_hist[1] == "STOP" and _drive_hist[0] == req:
+            _ignore_ultra[:] = [True, req]
+
+    ign = (_ignore_ultra[0] and req == _ignore_ultra[1])
+
+    if req == "REV":
+        chassis.drive_reverse()
+    elif req == "FWD":
+        chassis.drive_forward() if (not too_close or ign) else chassis.stop_drive()
+    elif req == "LEFT":
+        chassis.turn_left() if (not too_close or ign) else chassis.stop_drive()
+    elif req == "RIGHT":
+        chassis.turn_right() if (not too_close or ign) else chassis.stop_drive()
+    else:
+        chassis.stop_drive()
+
+    if req != _drive_hist[1]:
         _drive_hist = [_drive_hist[1], req]
-    _prev_f = f
+
     last_rx = time.time()
+
+    # Debug print (can be commented out in production)
+    print(
+        f"\r[RX] RollBits: {rollBits:02b} | PitchBits: {pitchBits:02b} | Flex: {[f0, f1, f2, f3, f4]} | DriveCmd: {req} | TooClose: {too_close} | IgnoringUltra: {ign}      ",
+        end="")
+
 
 def run_ssh_control():
     def getch():
