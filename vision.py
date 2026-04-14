@@ -192,3 +192,4 @@ def shutdown() -> None:
     global _cap_l, _cap_r
     if _cap_l is not None: _cap_l.release()
     if _cap_r is not None: _cap_r.release()
+    cv2.destroyAllWindows()
