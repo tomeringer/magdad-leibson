@@ -66,40 +66,39 @@ def bring_bottle_xz():
 
 
 def handle_payload(payload):
-    # global _arm_dir, _prev_f, _drive_hist, _ignore_ultra, last_rx
-    # f = [(payload >> (4 + i)) & 1 for i in range(4)]
-    # if all(f) and not all(_prev_f):
-    #     chassis.stop_drive()
-    #     arm.stop()
-    #     bring_bottle_xz()
-    # else:
-    #     if f[3] and not _prev_f[3]: gripper.move_step(1)
-    #     if f[2] and not _prev_f[2]: gripper.move_step(0)
-    #     _arm_dir = -1 if (f[0] and not f[1]) else 1 if (f[1] and not f[0]) else 0
-    #
-    #     p, r = payload & 0x03, (payload >> 2) & 0x03
-    #     req = "REV" if p == 1 else "FWD" if p == 2 else "LEFT" if r == 1 else "RIGHT" if r == 2 else "STOP"
-    #
-    #     too_close = chassis.obstacle_too_close()
-    #     if _ignore_ultra[0] and (req in ("STOP", "REV") or req != _ignore_ultra[1]): _ignore_ultra[0] = False
-    #     if (not _ignore_ultra[0]) and req in {"FWD", "LEFT", "RIGHT"}:
-    #         if _drive_hist[1] == "STOP" and _drive_hist[0] == req: _ignore_ultra[:] = [True, req]
-    #
-    #     ign = (_ignore_ultra[0] and req == _ignore_ultra[1])
-    #     if req == "REV":
-    #         chassis.drive_reverse()
-    #     elif req == "FWD":
-    #         chassis.drive_forward() if (not too_close or ign) else chassis.stop_drive()
-    #     elif req == "LEFT":
-    #         chassis.turn_left() if (not too_close or ign) else chassis.stop_drive()
-    #     elif req == "RIGHT":
-    #         chassis.turn_right() if (not too_close or ign) else chassis.stop_drive()
-    #     else:
-    #         chassis.stop_drive()
-    #     _drive_hist = [_drive_hist[1], req]
-    # _prev_f = f
-    # last_rx = time.time()
-    print(str(payload))
+    global _arm_dir, _prev_f, _drive_hist, _ignore_ultra, last_rx
+    f = [(payload >> (4 + i)) & 1 for i in range(4)]
+    if all(f) and not all(_prev_f):
+        chassis.stop_drive()
+        arm.stop()
+        bring_bottle_xz()
+    else:
+        if f[3] and not _prev_f[3]: gripper.move_step(1)
+        if f[2] and not _prev_f[2]: gripper.move_step(0)
+        _arm_dir = -1 if (f[0] and not f[1]) else 1 if (f[1] and not f[0]) else 0
+
+        p, r = payload & 0x03, (payload >> 2) & 0x03
+        req = "REV" if p == 1 else "FWD" if p == 2 else "LEFT" if r == 1 else "RIGHT" if r == 2 else "STOP"
+
+        too_close = chassis.obstacle_too_close()
+        if _ignore_ultra[0] and (req in ("STOP", "REV") or req != _ignore_ultra[1]): _ignore_ultra[0] = False
+        if (not _ignore_ultra[0]) and req in {"FWD", "LEFT", "RIGHT"}:
+            if _drive_hist[1] == "STOP" and _drive_hist[0] == req: _ignore_ultra[:] = [True, req]
+
+        ign = (_ignore_ultra[0] and req == _ignore_ultra[1])
+        if req == "REV":
+            chassis.drive_reverse()
+        elif req == "FWD":
+            chassis.drive_forward() if (not too_close or ign) else chassis.stop_drive()
+        elif req == "LEFT":
+            chassis.turn_left() if (not too_close or ign) else chassis.stop_drive()
+        elif req == "RIGHT":
+            chassis.turn_right() if (not too_close or ign) else chassis.stop_drive()
+        else:
+            chassis.stop_drive()
+        _drive_hist = [_drive_hist[1], req]
+    _prev_f = f
+    last_rx = time.time()
 
 
 def run_ssh_control():
@@ -143,10 +142,10 @@ def run_ssh_control():
 
 if __name__ == "__main__":
     try:
-        # chassis.init(factory, pi_enc)
-        # gripper.init(factory)
-        # arm.init(factory)
-        # vision.init()
+        chassis.init(factory, pi_enc)
+        gripper.init(factory)
+        arm.init(factory)
+        vision.init()
         if input("Use Keyboard? (y/n)\n").lower() == "y":
             run_ssh_control()
         else:
@@ -154,20 +153,17 @@ if __name__ == "__main__":
             sock.bind(("0.0.0.0", 4210))
             sock.settimeout(0.02)
             while True:
-                # chassis.ultrasonic_tick()
-                # if _arm_dir != 0:
-                #     arm.run(_arm_dir == 1)
-                # else:
-                #     arm.stop()
+                chassis.ultrasonic_tick()
+                if _arm_dir != 0:
+                    arm.run(_arm_dir == 1)
+                else:
+                    arm.stop()
                 try:
                     data, _ = sock.recvfrom(1024)
                     if len(data) >= 3 and data[0] == 0xAA and data[2] == 0x55: handle_payload(data[1])
                 except socket.timeout:
-                    if time.time() - last_rx > 0.7:
-                        # chassis.stop_drive()
-                        print("blah")
+                    if time.time() - last_rx > 0.7: chassis.stop_drive()
     finally:
-        # chassis.stop_drive()
-        # vision.shutdown()
-        # GPIO.cleanup()
-        print("blah")
+        chassis.stop_drive()
+        vision.shutdown()
+        GPIO.cleanup()
