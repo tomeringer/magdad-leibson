@@ -144,9 +144,9 @@ def detect_bottle_once() -> dict:
     frame_l = cv2.remap(frame_l_orig, _maps_l[0], _maps_l[1], cv2.INTER_LINEAR)
     frame_r = cv2.remap(frame_r_orig, _maps_r[0], _maps_r[1], cv2.INTER_LINEAR)
 
-    print("Blah")
     results_l = _model.predict(frame_l, conf=YOLO_CONF_THRESHOLD, classes=[BOTTLE_CLASS_ID], verbose=False)
     results_r = _model.predict(frame_r, conf=YOLO_CONF_THRESHOLD, classes=[BOTTLE_CLASS_ID], verbose=False)
+    print("Blah")
 
     X = Y = Z = cx = cy = disparity = conf = None
 
