@@ -89,6 +89,9 @@ def handle_payload(merged_byte, flex_low):
     _drive_hist = [_drive_hist[1], req]
     last_rx = time.time()
 
+    # Debug print (can be commented out in production)
+    print(f"\r[RX] RollBits: {rollBits:02b} | PitchBits: {pitchBits:02b} | Flex: {[f0, f1, f2, f3, f4]} | DriveCmd: {req} | TooClose: {too_close} | IgnoringUltra: {ign}      ", end="")
+
 def main():
     setup_hardware()
     
@@ -96,11 +99,17 @@ def main():
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind((UDP_IP, UDP_PORT))
     sock.settimeout(0.02)
+    if sock is None:
+        print("[ERROR] Failed to create UDP socket. Exiting.")
+        return
+    print("[NETWORK] UDP Server initialized successfully.")
     
     global last_rx
     last_rx = time.time()
 
     print("[SYSTEM] Robot Ready. Waiting for raw 2-byte glove commands...")
+
+
 
     try:
         while True:
