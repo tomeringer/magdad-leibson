@@ -99,8 +99,8 @@ def handle_payload(merged_byte, flex_low):
 
 def main():
     setup_hardware()
-    
     print(f"[NETWORK] Starting UDP Server on {UDP_IP}:{UDP_PORT}...")
+
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind((UDP_IP, UDP_PORT))
     sock.settimeout(0.02)
