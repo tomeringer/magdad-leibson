@@ -3,9 +3,7 @@ import tty
 import termios
 
 from gpiozero.pins.pigpio import PiGPIOFactory
-
 import piano_player as piano
-
 
 def run_piano_control():
     # Standard helper for raw keyboard input over SSH
@@ -19,36 +17,39 @@ def run_piano_control():
             termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
         return ch
 
-    # Initialize hardware (using None for default factory)
+    # Initialize hardware
     piano.init(PiGPIOFactory())
 
-    # We keep track of the toggle state for each finger
+    # Track the state for each finger (0 to 3)
     current_states = [0, 0, 0, 0, 0]
 
     print("--- Piano Servo SSH Control ---")
-    print("Keys 1-5: Toggle Fingers | Space: Reset All | Q: Quit")
+    print("Keys 1-5: Cycle Fingers (0->3) | Space: Reset All | Q: Quit")
+
+    # Initial set to flat
+    piano.set_states(current_states)
 
     while True:
         char = getch().lower()
 
         if char in ['1', '2', '3', '4', '5']:
             index = int(char) - 1
-            # Toggle between 0 and 1
-            current_states[index] = 1 if current_states[index] == 0 else 0
+            
+            # Cycle through states 0, 1, 2, 3
+            current_states[index] = (current_states[index] + 1) % 4
 
-            print(f"\rFinger {char} State: {current_states[index]}", end="")
+            print(f"\rFinger {char} State: {current_states[index]}      ", end="")
             piano.set_states(current_states)
 
         elif char == ' ' or char == 'k':
-            # Emergency Reset: lift all fingers
+            # Emergency Reset: lift all fingers to state 0
             current_states = [0, 0, 0, 0, 0]
-            print("\rResetting all fingers...       ", end="")
+            print("\rResetting all fingers to state 0...      ", end="")
             piano.set_states(current_states)
 
         elif char == 'q':
             print("\nQuitting...")
             break
-
 
 if __name__ == "__main__":
     try:

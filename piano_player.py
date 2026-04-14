@@ -1,17 +1,11 @@
 from gpiozero import Servo
 
-SERVO_PINS = [12, 4, 17, 27 ,22]  # From left to right. TODO: Update according to actual servos
-SERVO_MOVE_STEP = -0.144
-servo_offsets = [
-    (80 - 90) / 90,   # -0.111
-    (85 - 90) / 90,   # -0.055
-    (120 - 90) / 90,  #  0.333
-    (90 - 90) / 90,   #  0.0
-    (80 - 90) / 90    # -0.111
-]
+SERVO_PINS = [12, 4, 17, 27, 22]
 
-_current_servos_pos = servo_offsets.copy()
-_servos_states = [0, 0, 0, 0, 0]
+# Exact same arrays as your working ESP32 code
+SERVO_OFFSETS = [80, 85, 120, 90, 80]
+SERVO_STATES = [0, -13, -27, -40]
+
 servos = []
 
 def init(factory):
@@ -19,22 +13,27 @@ def init(factory):
     for pin in SERVO_PINS:
         servos.append(Servo(
             pin,
-            min_pulse_width=1 / 1000,
-            max_pulse_width=2 / 1000,
+            # Matched to ESP32's 410 duty (0.5ms) and 1966 duty (2.4ms)
+            min_pulse_width=0.5 / 1000,
+            max_pulse_width=2.4 / 1000,
             pin_factory=factory
         ))
 
-def move_step_index(position: int, index: int) -> None:
-    global _current_servos_pos, _servos_states, servos
-    if position == _servos_states[index]:
-        return
+def move_step_index(state: int, index: int) -> None:
+    global servos
+    
+    # 1. Calculate angle exactly like the ESP32
+    base_angle = SERVO_STATES[state]
+    calibrated_angle = base_angle + SERVO_OFFSETS[index]
 
-    new_val = _current_servos_pos[index] + (position - _servos_states[index]) * SERVO_MOVE_STEP
+    # 2. Constrain to 0-180 just like ESP32
+    calibrated_angle = max(0, min(180, calibrated_angle))
 
-    new_val = max(-1.0, min(1.0, new_val))
-    _current_servos_pos[index] = new_val
-    servos[index].value = _current_servos_pos[index]
-    _servos_states[index] = position
+    # 3. Convert 0-180 degrees to gpiozero's required -1.0 to 1.0 range
+    # 0 deg = -1.0 | 90 deg = 0.0 | 180 deg = 1.0
+    val = (calibrated_angle - 90) / 90.0
+
+    servos[index].value = val
 
 def set_states(positions: list[int]) -> None:
     for i in range(len(positions)):
