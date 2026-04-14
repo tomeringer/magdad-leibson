@@ -17,7 +17,7 @@
   ((byte) & 0x01 ? '1' : '0')
 
 // RMT Configuration for Transmitter [cite: 1, 3, 4]
-#define TX_PIN 5 
+#define TX_PIN 2 
 #define HALF_BIT 500
 
 constexpr uint8_t START_BYTE = 0xAA;
