@@ -38,3 +38,8 @@ def move_step_index(state: int, index: int) -> None:
 def set_states(positions: list[int]) -> None:
     for i in range(len(positions)):
         move_step_index(positions[i], i)
+
+def close_pins():
+    global servos
+    for servo in servos:
+        servo.close()

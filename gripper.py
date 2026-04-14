@@ -31,3 +31,8 @@ def move_step(direction: int) -> None:
     _current_servo_pos = new_val
     servo_obj.value = _current_servo_pos
     _servo_is_open = not want_close
+
+def close_pins():
+    global servo_obj
+    if servo_obj is not None:
+        servo_obj.close()
