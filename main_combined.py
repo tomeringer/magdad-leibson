@@ -72,7 +72,7 @@ def bring_bottle_xz():
         time.sleep(0.1)
 
 def handle_payload(merged_byte, flex_low):
-    global _drive_hist, _ignore_ultra, last_rx, _arm_dir
+    global _drive_hist, _ignore_ultra, last_rx, _arm_dir, _prev_f
 
     # --- 1. DECODE IMU DATA (From merged_byte) ---
     rollBits = (merged_byte >> 2) & 0x03
@@ -137,6 +137,7 @@ def handle_payload(merged_byte, flex_low):
         _drive_hist = [_drive_hist[1], req]
 
     last_rx = time.time()
+    _prev_f = f
 
     # Debug print (can be commented out in production)
     print(
