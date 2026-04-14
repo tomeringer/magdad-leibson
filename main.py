@@ -158,9 +158,10 @@ if __name__ == "__main__":
                 #     arm.run(_arm_dir == 1)
                 # else:
                 #     arm.stop()
-                data = ser.read(1)
-                handle_payload(data[0])  # Send byte to existing handler
-                last_rx = time.time()
+                if ser.in_waiting > 0:
+                    data = ser.read(1)
+                    handle_payload(data[0])  # Send byte to existing handler
+                    last_rx = time.time()
 
                 if time.time() - last_rx > 0.3:
                     # chassis.stop_drive()
