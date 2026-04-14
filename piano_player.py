@@ -10,10 +10,10 @@ servos = []
 
 def init(factory):
     global servos
+    servos.clear() 
     for pin in SERVO_PINS:
         servos.append(Servo(
             pin,
-            # Matched to ESP32's 410 duty (0.5ms) and 1966 duty (2.4ms)
             min_pulse_width=0.5 / 1000,
             max_pulse_width=2.4 / 1000,
             pin_factory=factory
