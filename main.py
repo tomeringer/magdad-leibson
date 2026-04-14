@@ -58,7 +58,7 @@ def bring_bottle_xz():
     while time.perf_counter() - t0 < 5.0:
         res = vision.detect_bottle_once()
         if res["found"]:
-            drive_arc(res['X'], res['Z'] - 4)
+            drive_arc(res['X'], res['Z'] - 3)
             time.sleep(0.3)
             gripper.move_step(1)
             return
