@@ -20,9 +20,9 @@ RIGHT_CAM_PATH = "/dev/v4l/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0
 CALIBRATION_FILE_PATH = "Autonomy/stereo_calibration.pkl"
 
 # Initial Setup
-# factory = PiGPIOFactory()
-# pi_enc = pigpio.pi()
-# GPIO.setmode(GPIO.BCM)
+factory = PiGPIOFactory()
+pi_enc = pigpio.pi()
+GPIO.setmode(GPIO.BCM)
 
 _arm_dir = 0
 _prev_f = [0, 0, 0, 0]
