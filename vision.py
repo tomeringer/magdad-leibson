@@ -189,6 +189,20 @@ def detect_bottle_once() -> dict:
 
 
 def shutdown() -> None:
-    global _cap_l, _cap_r
-    if _cap_l is not None: _cap_l.release()
-    if _cap_r is not None: _cap_r.release()
+    global _vision_ready, _cap_l, _cap_r
+    
+    # Release hardware and reset the variables to None
+    if _cap_l is not None: 
+        _cap_l.release()
+        _cap_l = None
+        
+    if _cap_r is not None: 
+        _cap_r.release()
+        _cap_r = None
+        
+    cv2.destroyAllWindows()
+    
+    # Crucial: Reset the flag so init() knows it has to start over next time
+    _vision_ready = False
+    
+    print("[VISION] Shutdown complete. Cameras released.")

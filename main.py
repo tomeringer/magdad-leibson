@@ -13,7 +13,7 @@ import vision
 os.environ['PIGPIO_ADDR'] = 'localhost'
 
 # Constants
-ARC_STOP_OFFSET_CM, Z0_STOP_DISTANCE_CM = 4.5, 21.0
+ARC_STOP_OFFSET_CM, Z0_STOP_DISTANCE_CM = 4.5, 22
 ARC_MAX_OUTER_SPEED, ARC_SPEED_DIFF_FACTOR = 0.3, 1.06
 LEFT_CAM_PATH = "/dev/v4l/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.4:1.0-video-index0"
 RIGHT_CAM_PATH = "/dev/v4l/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.1:1.0-video-index0"
@@ -34,7 +34,7 @@ last_rx = 0.0
 def get_average_distance():
     dist_l = abs(chassis.enc_left.output_revolutions()) * chassis.WHEEL_CIRCUMFERENCE_CM
     dist_r = abs(chassis.enc_right.output_revolutions()) * chassis.WHEEL_CIRCUMFERENCE_CM
-    return (dist_l + dist_l) / 2.0
+    return (dist_l + dist_r) / 2.0
 
 
 def drive_arc(target_x, target_z):
