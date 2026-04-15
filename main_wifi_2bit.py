@@ -2,6 +2,7 @@ import socket
 import time
 from gpiozero.pins.pigpio import PiGPIOFactory
 from gpiozero import DistanceSensor
+import pigpio # <--- ADD THIS IMPORT
 
 # Import all robot modules
 import piano_player as piano
@@ -23,10 +24,11 @@ print(f"Listening for Dual-Mode Glove Data on UDP port {UDP_PORT}...")
 #            HARDWARE SETUP
 # ==========================================
 factory = PiGPIOFactory()
+pi_enc = pigpio.pi()  # <--- INITIALIZE PIGPIO DAEMON
 
 # Initialize all components
 piano.init(factory)
-chassis.init(factory)
+chassis.init(factory, pi_enc)  # <--- PASS BOTH ARGUMENTS HERE
 arm.init(factory)
 gripper.init(factory)
 
