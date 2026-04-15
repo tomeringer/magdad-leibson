@@ -44,7 +44,7 @@ def open_cam(path: str, name: str) -> cv2.VideoCapture:
         cap = cv2.VideoCapture(real_path, cv2.CAP_V4L2)
         if cap.isOpened():
             print(f"[CAM] Opened {path} -> {real_path}")
-            return cap
+            break
         time.sleep(1)
 
     print(f"[CAM] {name}: opening {path} isOpened={cap.isOpened()}", flush=True)
