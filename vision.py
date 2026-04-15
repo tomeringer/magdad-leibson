@@ -115,6 +115,7 @@ def init() -> None:
     _model = YOLO('Autonomy/yolov8n_ncnn_model', task='detect')
 
     _cap_l = open_cam(LEFT_CAM_PATH, "LEFT")
+    time.sleep(2)
     _cap_r = open_cam(RIGHT_CAM_PATH, "RIGHT")
     if not _cap_l.isOpened() or not _cap_r.isOpened():
         raise RuntimeError("One or both cameras failed to open.")
