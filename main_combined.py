@@ -96,15 +96,15 @@ def handle_payload(merged_byte, flex_low):
     else:
         if f[4] and not _prev_f[4]: gripper.move_step(1)
         if f[0] and not _prev_f[0]: gripper.move_step(0)
-        _arm_dir = -1 if (f[2] and not f[1]) else 1 if (f[1] and not f[2]) else 0
+        _arm_dir = 1 if (f[2] and not f[1]) else -1 if (f[1] and not f[2]) else 0
         if _arm_dir != 0:
             gripper.move_step(_arm_dir > 1)
 
     # --- 3. DRIVE CHASSIS WITH ULTRASONIC SAFETY ---
     req = "STOP"
-    if pitchBits == 0b01:  # + Pitch
+    if pitchBits == 0b10:  # + Pitch
         req = "FWD"
-    elif pitchBits == 0b10:  # - Pitch
+    elif pitchBits == 0b01:  # - Pitch
         req = "REV"
     elif rollBits == 0b01:  # + Roll
         req = "RIGHT"
