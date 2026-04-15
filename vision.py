@@ -37,7 +37,20 @@ _maps_l = None
 _maps_r = None
 _Q = None
 
+def wait_for_symlink(symlink_path, timeout=15):
+    """Block until the symlink exists and resolves to a real device."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if os.path.exists(symlink_path) and os.path.exists(os.path.realpath(symlink_path)):
+            return True
+        print(f"[CAM] Waiting for {symlink_path}...")
+        time.sleep(0.5)
+    return False
+
 def open_cam(path: str, name: str) -> cv2.VideoCapture:
+    if not wait_for_symlink(path, timeout=15):
+        raise RuntimeError(f"Symlink never appeared: {path}")
+
     cap = None
     for _ in range(10):
         real_path = os.path.realpath(path)
