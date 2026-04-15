@@ -37,9 +37,13 @@ _maps_l = None
 _maps_r = None
 _Q = None
 
+def resolve_camera(symlink_path):
+    # Resolves /dev/video_sonix1 -> /dev/video2 (or whatever the real node is)
+    real_path = os.path.realpath(symlink_path)
+    return real_path
 
 def open_cam(path: str, name: str) -> cv2.VideoCapture:
-    cap = cv2.VideoCapture(path, cv2.CAP_V4L2)
+    cap = cv2.VideoCapture(resolve_camera(path), cv2.CAP_V4L2)
     print(f"[CAM] {name}: opening {path} isOpened={cap.isOpened()}", flush=True)
     if not cap.isOpened():
         return cap
