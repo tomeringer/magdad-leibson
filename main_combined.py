@@ -206,6 +206,7 @@ def handle_hand_payload(merged_byte, flex_low):
 
     if mode_bit == 1:
         piano_player.set_states([f0, f1, f2, f3, f4])
+        print(f"\r[RX] RollBits: {rollBits:02b} | PitchBits: {pitchBits:02b} | Flex: {[f0, f1, f2, f3, f4]}", end="")
     else:
         if f1 > 2:
             arm.run(True)
@@ -250,9 +251,7 @@ def handle_hand_payload(merged_byte, flex_low):
             _drive_hist = [_drive_hist[1], req]
 
         last_rx = time.time()
-
-    # Debug print (can be commented out in production)
-    print(f"\r[RX] RollBits: {rollBits:02b} | PitchBits: {pitchBits:02b} | Flex: {[f0, f1, f2, f3, f4]} | DriveCmd: {req} | TooClose: {too_close} | IgnoringUltra: {ign}      ", end="")
+        print(f"\r[RX] RollBits: {rollBits:02b} | PitchBits: {pitchBits:02b} | Flex: {[f0, f1, f2, f3, f4]} | DriveCmd: {req} | TooClose: {too_close} | IgnoringUltra: {ign}      ", end="")
 
 
 def run_hand_ssh_control():
