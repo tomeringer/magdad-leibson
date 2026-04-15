@@ -2,13 +2,26 @@ import socket
 import time
 from gpiozero.pins.pigpio import PiGPIOFactory
 from gpiozero import DistanceSensor
-import pigpio # <--- ADD THIS IMPORT
+import pigpio
 
-# Import all robot modules
+# --- ADD THESE 3 LINES ---
+import RPi.GPIO as GPIO
+GPIO.setmode(GPIO.BCM)      # Tells the Pi to use the BCM GPIO numbering
+GPIO.setwarnings(False)     # Prevents annoying warnings if a pin was left on
+
+# Import all robot modules (Keep these BELOW the GPIO setup!)
 import piano_player as piano
 import chassis
 import arm
 import gripper
+
+# ==========================================
+#              NETWORK SETUP
+# ==========================================
+UDP_IP = "0.0.0.0"
+UDP_PORT = 4210
+
+# ... [rest of your code continues exactly the same] ...
 
 # ==========================================
 #              NETWORK SETUP
