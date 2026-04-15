@@ -9,8 +9,8 @@ from ultralytics import YOLO
 # ============================================================
 # CONSTANTS (Required by the functions below)
 # ============================================================
-CAM_WIDTH = 320
-CAM_HEIGHT = 240
+CAM_WIDTH = 640
+CAM_HEIGHT = 480
 CAM_FPS = 5
 DEFAULT_IMG_SIZE = (CAM_WIDTH, CAM_HEIGHT)
 
