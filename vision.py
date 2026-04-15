@@ -22,8 +22,8 @@ CAMERA_YAW_OFFSET_RAD = math.radians(3)
 CAMERA_X_OFFSET_CM = 5.0
 
 # These paths usually come from main.py, defined here for safety
-LEFT_CAM_PATH = "/dev/v4l/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.4:1.0-video-index0"
-RIGHT_CAM_PATH = "/dev/v4l/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.1:1.0-video-index0"
+LEFT_CAM_PATH = "/dev/video_sonix1"
+RIGHT_CAM_PATH = "/dev/video_sonix2"
 CALIBRATION_FILE_PATH = "Autonomy/stereo_calibration.pkl"
 
 # ============================================================
