@@ -208,6 +208,7 @@ def handle_hand_payload(merged_byte, flex_low):
         piano_player.set_states([f0, f1, f2, f3, f4])
         print(f"\r[RX] RollBits: {rollBits:02b} | PitchBits: {pitchBits:02b} | Flex: {[f0, f1, f2, f3, f4]}", end="")
     else:
+        piano_player.set_states([0, 0, 0, 0, 0])
         if f1 > 2:
             arm.run(False)
         elif f2 > 2:
