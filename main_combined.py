@@ -202,46 +202,54 @@ def handle_hand_payload(merged_byte, flex_low):
     f2 = (flex_low >> 4) & 0x03
     f3 = (flex_low >> 6) & 0x03
 
-    # Pass all 5 fingers to the piano player
-    piano_player.set_states([f0, f1, f2, f3, f4])
+    mode_bit = (merged_byte >> 6) & 0x01
 
-    # --- 3. DRIVE CHASSIS WITH ULTRASONIC SAFETY ---
-    req = "STOP"
-    if pitchBits == 0b01:     # + Pitch
-        req = "FWD"
-    elif pitchBits == 0b10:   # - Pitch
-        req = "REV"
-    elif rollBits == 0b01:    # + Roll
-        req = "RIGHT"
-    elif rollBits == 0b10:    # - Roll
-        req = "LEFT"
-        
-    too_close = chassis.obstacle_too_close()
-    
-    if _ignore_ultra[0] and (req in ("STOP", "REV") or req != _ignore_ultra[1]): 
-        _ignore_ultra[0] = False
-        
-    if (not _ignore_ultra[0]) and req in {"FWD", "LEFT", "RIGHT"}:
-        if _drive_hist[1] == "STOP" and _drive_hist[0] == req: 
-            _ignore_ultra[:] = [True, req]
-
-    ign = (_ignore_ultra[0] and req == _ignore_ultra[1])
-    
-    if req == "REV":
-        chassis.drive_reverse()
-    elif req == "FWD":
-        chassis.drive_forward() if (not too_close or ign) else chassis.stop_drive()
-    elif req == "LEFT":
-        chassis.turn_left() if (not too_close or ign) else chassis.stop_drive()
-    elif req == "RIGHT":
-        chassis.turn_right() if (not too_close or ign) else chassis.stop_drive()
+    if mode_bit == 1:
+        piano_player.set_states([f0, f1, f2, f3, f4])
     else:
-        chassis.stop_drive()
-        
-    if req != _drive_hist[1]:
-        _drive_hist = [_drive_hist[1], req]
-        
-    last_rx = time.time()
+        if f1 > 2:
+            arm.run(True)
+        elif f2 > 2:
+            arm.run(False)
+        else:
+            arm.stop()
+
+        req = "STOP"
+        if pitchBits == 0b01:     # + Pitch
+            req = "FWD"
+        elif pitchBits == 0b10:   # - Pitch
+            req = "REV"
+        elif rollBits == 0b01:    # + Roll
+            req = "RIGHT"
+        elif rollBits == 0b10:    # - Roll
+            req = "LEFT"
+
+        too_close = chassis.obstacle_too_close()
+
+        if _ignore_ultra[0] and (req in ("STOP", "REV") or req != _ignore_ultra[1]):
+            _ignore_ultra[0] = False
+
+        if (not _ignore_ultra[0]) and req in {"FWD", "LEFT", "RIGHT"}:
+            if _drive_hist[1] == "STOP" and _drive_hist[0] == req:
+                _ignore_ultra[:] = [True, req]
+
+        ign = (_ignore_ultra[0] and req == _ignore_ultra[1])
+
+        if req == "REV":
+            chassis.drive_reverse()
+        elif req == "FWD":
+            chassis.drive_forward() if (not too_close or ign) else chassis.stop_drive()
+        elif req == "LEFT":
+            chassis.turn_left() if (not too_close or ign) else chassis.stop_drive()
+        elif req == "RIGHT":
+            chassis.turn_right() if (not too_close or ign) else chassis.stop_drive()
+        else:
+            chassis.stop_drive()
+
+        if req != _drive_hist[1]:
+            _drive_hist = [_drive_hist[1], req]
+
+        last_rx = time.time()
 
     # Debug print (can be commented out in production)
     print(f"\r[RX] RollBits: {rollBits:02b} | PitchBits: {pitchBits:02b} | Flex: {[f0, f1, f2, f3, f4]} | DriveCmd: {req} | TooClose: {too_close} | IgnoringUltra: {ign}      ", end="")
