@@ -114,8 +114,8 @@ def init() -> None:
     print("[VISION] Initializing YOLO + stereo...", flush=True)
     _model = YOLO('Autonomy/yolov8n_ncnn_model', task='detect')
 
-    _cap_r = open_cam(RIGHT_CAM_PATH, "RIGHT")
     _cap_l = open_cam(LEFT_CAM_PATH, "LEFT")
+    _cap_r = open_cam(RIGHT_CAM_PATH, "RIGHT")
     if not _cap_l.isOpened() or not _cap_r.isOpened():
         raise RuntimeError("One or both cameras failed to open.")
 
@@ -190,7 +190,7 @@ def detect_bottle_once() -> dict:
 
 def shutdown() -> None:
     global _vision_ready, _cap_l, _cap_r
-
+    
     # Release hardware and reset the variables to None
     if _cap_l is not None: 
         _cap_l.release()
