@@ -50,8 +50,8 @@ def open_cam(path: str, name: str) -> cv2.VideoCapture:
     cap.set(cv2.CAP_PROP_FPS, CAM_FPS)
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
-    for _ in range(10):
-        cap.read()
+    # for _ in range(10):
+    #     cap.read()
 
     print(f"[CAM] {name}: negotiated "
           f"{cap.get(cv2.CAP_PROP_FRAME_WIDTH):.0f}x{cap.get(cv2.CAP_PROP_FRAME_HEIGHT):.0f} "
