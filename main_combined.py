@@ -345,6 +345,7 @@ if __name__ == "__main__":
                 try:
                     # Initialize components for hand mode
                     chassis.init(factory, pi_enc)
+                    arm.init(factory)
                     piano_player.init(factory)
 
                     if input("Use Keyboard? (y/n)\n").lower() == "y":
