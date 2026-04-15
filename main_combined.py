@@ -87,7 +87,7 @@ def handle_payload(merged_byte, flex_low):
     f3 = (flex_low >> 6) & 0x03
 
     f_2b = [f0, f1, f2, f3, f4]
-    f = [0 if (f == 0) or (f == 1) else 1 for f in f_2b]
+    f = [1 if f == 3 else 0 for f in f_2b]
 
     if all(f) and not all(_prev_f):
         chassis.stop_drive()
@@ -209,9 +209,9 @@ def handle_hand_payload(merged_byte, flex_low):
         print(f"\r[RX] RollBits: {rollBits:02b} | PitchBits: {pitchBits:02b} | Flex: {[f0, f1, f2, f3, f4]}", end="")
     else:
         if f1 > 2:
-            arm.run(True)
-        elif f2 > 2:
             arm.run(False)
+        elif f2 > 2:
+            arm.run(True)
         else:
             arm.stop()
 
@@ -365,7 +365,7 @@ if __name__ == "__main__":
                             try:
                                 data, addr = sock.recvfrom(1024)                    
                                 if len(data) >= 2:
-                                    handle_hand_payload(data[0], data[1])  
+                                    handle_hand_payload(data[0], data[1])
                             except socket.timeout:
                                 # If no packet arrives for 0.7 seconds, halt the robot
                                 if time.time() - last_rx > 0.7: 
