@@ -100,6 +100,14 @@ float HYSTERESIS[NUM_FLEX][3] = {
 int currentStates[NUM_FLEX] = {0, 0, 0, 0, 0};
 
 // ========================================================
+//                  MODE TOGGLE GESTURE SETUP
+// ========================================================
+unsigned long gestureStartTime = 0;
+bool gestureActive = false;
+bool gestureProcessed = false;
+uint8_t modeBit = 0; // The new bit to tell the robot how to parse data
+
+// ========================================================
 //                      HELPERS
 // ========================================================
 float wrapAngle(float a) {
@@ -184,8 +192,8 @@ uint8_t encodeAxis(float angle, float th) {
 // ========================================================
 void setup() {
   Serial.begin(115200);
-  while (!Serial); 
-  Serial.println("Glove System - Reordered 5-Finger UDP Mode");
+  // while (!Serial); // Commented out to prevent hang when running standalone
+  Serial.println("Glove System - Reordered 5-Finger UDP Mode + Toggle Bit");
 
   Wire.begin();
   Wire.setClock(400000);
@@ -254,21 +262,44 @@ void loop() {
     uint8_t pitchBits = encodeAxis(relPitch, PITCH_TH);
     uint8_t imuByte = (rollBits << 2) | pitchBits;
 
+    // --- GESTURE DETECTION FOR MODE BIT ---
+    // User applied all fingers (state 3) except f1 and f2 (state 0)
+    bool isGesture = (currentStates[0] >= 1 && currentStates[3] >= 1 && currentStates[4] >= 1 && 
+                      currentStates[1] == 0 && currentStates[2] == 0);
+
+    if (isGesture) {
+      if (!gestureActive) {
+        gestureActive = true;
+        gestureStartTime = nowMs;
+        gestureProcessed = false;
+      } else if (!gestureProcessed && (nowMs - gestureStartTime >= 2000)) {
+        modeBit = (modeBit == 0) ? 1 : 0; // Toggle the bit
+        gestureProcessed = true; // Prevent rapid toggling
+        Serial.print("\n>>> MODE BIT TOGGLED TO: ");
+        Serial.println(modeBit);
+      }
+    } else {
+      gestureActive = false;
+      gestureProcessed = false;
+    }
+
     // Split the 16-bit flex data
     uint8_t flexHigh = (flexData >> 8) & 0x03; // Top 2 bits (Finger 4)
     uint8_t flexLow  = flexData & 0xFF;        // Bottom 8 bits (Fingers 0-3)
 
-    // Merge flexHigh and imuByte
-    uint8_t mergedByte = (flexHigh << 4) | imuByte;
+    // Merge modeBit (bit 6), flexHigh (bits 4-5), and imuByte (bits 0-3)
+    uint8_t mergedByte = (modeBit << 6) | (flexHigh << 4) | imuByte;
 
     // Output strictly for Serial Debugging
     Serial.print("IMU: R="); Serial.print(relRoll, 1);
     Serial.print(" P="); Serial.print(relPitch, 1);
+    Serial.print(" | Mode: "); Serial.print(modeBit);
     Serial.print(" | Merged: "); Serial.printf(BYTE_TO_BINARY_PATTERN, BYTE_TO_BINARY(mergedByte));
     Serial.print(" | Low: "); Serial.printf(BYTE_TO_BINARY_PATTERN, BYTE_TO_BINARY(flexLow));
     Serial.println();
 
-    bool isZeroPacket = (mergedByte == 0x00 && flexLow == 0x00);
+    // Mask out the modeBit when checking for a zero packet to save battery when the hand is flat
+    bool isZeroPacket = ((mergedByte & 0x3F) == 0x00 && flexLow == 0x00);
 
     // --- UDP TRANSMISSION (Raw 2-Byte Payload) ---
     if (!(isZeroPacket && lastPacketWasZero)) {
