@@ -216,9 +216,9 @@ def handle_hand_payload(merged_byte, flex_low):
             arm.stop()
 
         req = "STOP"
-        if pitchBits == 0b01:     # + Pitch
+        if pitchBits == 0b10:     # + Pitch
             req = "FWD"
-        elif pitchBits == 0b10:   # - Pitch
+        elif pitchBits == 0b01:   # - Pitch
             req = "REV"
         elif rollBits == 0b01:    # + Roll
             req = "RIGHT"
