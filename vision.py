@@ -47,16 +47,23 @@ def wait_for_symlink(symlink_path, timeout=15):
         time.sleep(0.5)
     return False
 
+def path_to_index(symlink_path):
+    """Resolve symlink and extract the numeric index OpenCV wants."""
+    real_path = os.path.realpath(symlink_path)  # e.g. /dev/video4
+    if not real_path.startswith("/dev/video"):
+        raise RuntimeError(f"Unexpected device path: {real_path}")
+    return int(real_path.replace("/dev/video", ""))  # e.g. 4
+
 def open_cam(path: str, name: str) -> cv2.VideoCapture:
     if not wait_for_symlink(path, timeout=15):
         raise RuntimeError(f"Symlink never appeared: {path}")
 
     cap = None
     for _ in range(10):
-        real_path = os.path.realpath(path)
-        cap = cv2.VideoCapture(real_path, cv2.CAP_V4L2)
+        index = path_to_index(path)
+        cap = cv2.VideoCapture(index, cv2.CAP_V4L2)
         if cap.isOpened():
-            print(f"[CAM] Opened {path} -> {real_path}")
+            print(f"[CAM] Opened {path} -> {index}")
             break
         time.sleep(1)
 
