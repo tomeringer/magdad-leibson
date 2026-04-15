@@ -331,7 +331,7 @@ if __name__ == "__main__":
                 except KeyboardInterrupt:
                     print("\n[INFO] Returning to main menu...")
                 except Exception as e:
-                    print(f"[ERROR] An error occurred in GRIPPER mode: {e}")
+                    print(f"[ERROR] An error occurred in GRIPPER mode: {e.__traceback__}")
                 finally:
                     # Cleanup specific to gripper mode before looping back
                     chassis.stop_drive()
@@ -373,7 +373,7 @@ if __name__ == "__main__":
                 except KeyboardInterrupt:
                     print("\n[INFO] Returning to main menu...")
                 except Exception as e:
-                    print(f"[ERROR] An error occurred in HAND mode: {e}")
+                    print(f"[ERROR] An error occurred in HAND mode: {e.__traceback__}")
                 finally:
                     # Cleanup specific to hand mode before looping back
                     chassis.stop_drive()
