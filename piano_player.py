@@ -10,10 +10,10 @@ servos = []
 
 def init(factory):
     global servos
+    servos.clear() 
     for pin in SERVO_PINS:
         servos.append(Servo(
             pin,
-            # Matched to ESP32's 410 duty (0.5ms) and 1966 duty (2.4ms)
             min_pulse_width=0.5 / 1000,
             max_pulse_width=2.4 / 1000,
             pin_factory=factory
@@ -38,3 +38,14 @@ def move_step_index(state: int, index: int) -> None:
 def set_states(positions: list[int]) -> None:
     for i in range(len(positions)):
         move_step_index(positions[i], i)
+
+def close_pins():
+    global servos
+    for servo in servos:
+        if servo is not None:
+            servo.detach()  
+    import time
+    time.sleep(0.1)    
+    for servo in servos:
+        if servo is not None:
+            servo.close()

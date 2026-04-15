@@ -111,3 +111,10 @@ def turn_right(speed=0.2):
 def turn_left(speed=0.2):
     RIGHT_RPWM.value, LEFT_LPWM.value = speed * SPEED_DIFF_FACTOR, speed
     RIGHT_LPWM.value = LEFT_RPWM.value = 0.0
+
+
+def close_pins():
+    RIGHT_RPWM.close()
+    LEFT_RPWM.close()
+    RIGHT_LPWM.close()
+    LEFT_LPWM.close()
