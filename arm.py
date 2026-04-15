@@ -23,6 +23,7 @@ def run(forward: bool) -> None:
     Moves the arm using L298N logic.
     Exactly like drive_forward or drive_reverse.
     """
+    print("hello there")
     if ARM_RPWM and ARM_LPWM:
         if forward:
             ARM_RPWM.value = 1.0
