@@ -1,0 +1,127 @@
+#define RX_PIN1 3 // מקלט ראשון
+#define RX_PIN2 2 // מקלט שני (במרחק 17.3 ס"מ)
+#define GREEN_LED 4
+#define RED_LED 5
+
+unsigned long lastRxTime = 0;
+bool isConnected = false;
+
+void setup() {
+  Serial.begin(115200); 
+  
+  // חסימת USB
+  while (!Serial) { delay(10); } 
+  
+  pinMode(RX_PIN1, INPUT);
+  pinMode(RX_PIN2, INPUT);
+  pinMode(GREEN_LED, OUTPUT);
+  pinMode(RED_LED, OUTPUT);
+  
+  digitalWrite(GREEN_LED, LOW);
+  digitalWrite(RED_LED, HIGH);
+  
+  Serial.println("Arduino DUAL RX Bridge Ready. (Spatial Diversity Mode)");
+}
+
+void loop() {
+  // אינדיקציה של ניתוק
+  if (millis() - lastRxTime > 600 && isConnected) {
+    digitalWrite(GREEN_LED, LOW);
+    digitalWrite(RED_LED, HIGH);
+    isConnected = false;
+  }
+
+  uint8_t activePin = 0; 
+  unsigned long searchStart = micros();
+  unsigned long highStart1 = 0, highStart2 = 0;
+  bool last1 = digitalRead(RX_PIN1);
+  bool last2 = digitalRead(RX_PIN2);
+
+  // סורק את שני המקלטים במקביל למשך 50 מילי-שניות
+  while (micros() - searchStart < 50000) {
+    bool v1 = digitalRead(RX_PIN1);
+    bool v2 = digitalRead(RX_PIN2);
+
+    // בדיקת מקלט 1
+    if (v1 == HIGH && last1 == LOW) {
+      highStart1 = micros();
+    } 
+    else if (v1 == LOW && last1 == HIGH) {
+      unsigned long dur = micros() - highStart1;
+      if (dur > 650 && dur < 1300) { activePin = RX_PIN1; break; }
+    }
+
+    // בדיקת מקלט 2
+    if (v2 == HIGH && last2 == LOW) {
+      highStart2 = micros();
+    } 
+    else if (v2 == LOW && last2 == HIGH) {
+      unsigned long dur = micros() - highStart2;
+      if (dur > 650 && dur < 1300) { activePin = RX_PIN2; break; }
+    }
+
+    last1 = v1; 
+    last2 = v2;
+  }
+
+  // אם אחד המקלטים תפס פולס סנכרון תקין
+  if (activePin != 0) {
+    unsigned long tSyncLowStart = micros();
+    
+    // המתנה לירידת הסנכרון רק על הפין הפעיל שניצח
+    while (digitalRead(activePin) == LOW && (micros() - tSyncLowStart < 1500));
+    
+    unsigned long t0 = micros(); 
+    uint32_t combinedData = 0; 
+    bool error = false;
+
+    // דגימה של 25 ביטים מהפין הפעיל
+    for (int i = 0; i < 25; i++) {
+      while (micros() - t0 < (i * 1000 + 250)); // רבע ראשון
+      int v1 = digitalRead(activePin);
+      
+      while (micros() - t0 < (i * 1000 + 750)); // רבע שלישי
+      int v2 = digitalRead(activePin);
+
+      if (v1 == HIGH && v2 == LOW) {
+        combinedData |= (1UL << (24 - i)); 
+      } 
+      else if (v1 == LOW && v2 == HIGH) { /* Bit 0 */ } 
+      else { error = true; break; }
+    }
+
+    // פענוח ואימות מנצ'סטר
+    if (!error && ((combinedData >> 24) & 1)) { 
+      uint8_t mergedByte = (combinedData >> 16) & 0xFF; 
+      uint8_t flexLow = (combinedData >> 8) & 0xFF; 
+      uint8_t receivedChecksum = combinedData & 0xFF;
+
+      // בדיקת Checksum
+      if (((mergedByte + flexLow) & 0xFF) == receivedChecksum) {
+        
+        digitalWrite(GREEN_LED, HIGH);
+        digitalWrite(RED_LED, LOW);
+        isConnected = true;
+        
+        // סינון כפילויות שידור
+        static uint32_t lastData = 0;
+        uint32_t currentData = (mergedByte << 8) | flexLow;
+
+        if (currentData != lastData || millis() - lastRxTime > 120) {
+            
+            // הדפסה נקייה לפאי
+            Serial.print("DATA:");
+            Serial.print(mergedByte);
+            Serial.print(",");
+            Serial.println(flexLow);
+            
+            lastData = currentData;
+            lastRxTime = millis();
+        }
+      }
+    }
+  } else {
+    // שחרור ה-USB אם לא מצאנו שום סנכרון באף מקלט
+    delayMicroseconds(50);
+  }
+}
