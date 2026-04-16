@@ -2,6 +2,7 @@ import time
 import socket
 import pigpio
 from gpiozero import PWMOutputDevice
+import RPi.GPIO as GPIO
 from gpiozero.pins.rpigpio import RPiGPIOFactory
 
 # --- CONFIGURATION ---
@@ -9,6 +10,7 @@ COMPUTER_IP = "10.135.205.20"  # <--- Change to your PC's IP
 UDP_PORT = 5005
 factory = RPiGPIOFactory()
 pi_enc = pigpio.pi()
+GPIO.setmode(GPIO.BCM)
 
 # Motor Pins
 RIGHT_RPWM_PIN, RIGHT_LPWM_PIN = 2, 3
@@ -45,6 +47,8 @@ class YellowJacketEncoder:
 # Motors
 right_rpwm = PWMOutputDevice(RIGHT_RPWM_PIN, frequency=1000, pin_factory=factory)
 left_rpwm = PWMOutputDevice(LEFT_RPWM_PIN, frequency=1000, pin_factory=factory)
+right_lpwm = PWMOutputDevice(RIGHT_LPWM_PIN, frequency=1000, pin_factory=factory)
+left_lpwm = PWMOutputDevice(LEFT_LPWM_PIN, frequency=1000, pin_factory=factory)
 # (Left/Right LPWM are only needed for reverse; omitted here for forward-only test)
 
 # Encoders
@@ -56,14 +60,16 @@ sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
 
 def drive_forward(speed=0.3):
-    right_rpwm.value = speed * SPEED_DIFF_FACTOR
-    left_rpwm.value = speed
+    right_rpwm.value, left_rpwm.value = speed * SPEED_DIFF_FACTOR, speed
+    right_lpwm.value = left_lpwm.value = 0.0
 
 
-def stop_motors():
-    right_rpwm.value = 0
-    left_rpwm.value = 0
+def drive_reverse(speed=0.3):
+    right_lpwm.value, left_lpwm.value = speed * SPEED_DIFF_FACTOR, speed
+    right_rpwm.value = left_rpwm.value = 0.0
 
+def stop_drive():
+    right_rpwm.value = right_lpwm.value = left_rpwm.value = left_lpwm.value = 0.0
 
 # --- MAIN LOOP ---
 try:
@@ -84,5 +90,6 @@ try:
 except KeyboardInterrupt:
     print("\nStopping...")
 finally:
-    stop_motors()
+    stop_drive()
+    GPIO.cleanup()
     pi_enc.stop()
