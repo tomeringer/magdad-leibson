@@ -32,7 +32,7 @@ GPIO.setmode(GPIO.BCM)
 
 _arm_dir = 0
 _prev_f = [0, 0, 0, 0, 0]
-_binary_f = [0, 0, 0, 0, 0]  # NEW: Tracks the latched binary states of the fingers
+_binary_f = [0, 0, 0, 0, 0]  # Tracks the latched binary states of the fingers
 _drive_hist = ["STOP", "STOP"]
 _ignore_ultra = [False, None]
 last_rx = 0.0
@@ -82,11 +82,11 @@ def handle_payload(merged_byte, flex_low, b3=0, b4=0):
     f_2b = [(flex_low >> (i * 2)) & 0x03 for i in range(4)]
     f_2b.append((merged_byte >> 4) & 0x03)
     
-    # NEW: Software Hysteresis - Latch ON at 3, Latch OFF at 0
+    # FIXED: Software Hysteresis - Latch ON at 3, Latch OFF at 1 (or 0)
     for i in range(5):
         if _binary_f[i] == 0 and f_2b[i] == 3:
             _binary_f[i] = 1
-        elif _binary_f[i] == 1 and f_2b[i] == 0:
+        elif _binary_f[i] == 1 and f_2b[i] <= 1:
             _binary_f[i] = 0
 
     f = list(_binary_f) # Use the locked binary states for logic
@@ -170,11 +170,11 @@ def handle_hand_payload(merged_byte, flex_low, *args):
     f_2b = [(flex_low >> (i * 2)) & 0x03 for i in range(4)]
     f_2b.append((merged_byte >> 4) & 0x03)
 
-    # NEW: Software Hysteresis - Latch ON at 3, Latch OFF at 0
+    # FIXED: Software Hysteresis - Latch ON at 3, Latch OFF at 1 (or 0)
     for i in range(5):
         if _binary_f[i] == 0 and f_2b[i] == 3:
             _binary_f[i] = 1
-        elif _binary_f[i] == 1 and f_2b[i] == 0:
+        elif _binary_f[i] == 1 and f_2b[i] <= 1:
             _binary_f[i] = 0
 
     if modeBit == 1:
