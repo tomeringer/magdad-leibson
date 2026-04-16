@@ -70,16 +70,13 @@ def bring_bottle_xz():
             return
         time.sleep(0.1)
 
-# FIXED: Standardized variables to merged_byte and flex_low
 def handle_payload(merged_byte, flex_low, b3=0, b4=0):
     global _drive_hist, _ignore_ultra, last_rx, _arm_dir, _prev_f
 
-    # FIXED: Correct bit extraction
     rollBits = (merged_byte >> 2) & 0x03
     pitchBits = merged_byte & 0x03
     modeBit = (merged_byte >> 6) & 0x01
 
-    # FIXED: Fingers 0-3 from flex_low, Finger 4 from merged_byte bits 4-5
     f_2b = [(flex_low >> (i * 2)) & 0x03 for i in range(4)]
     f_2b.append((merged_byte >> 4) & 0x03)
     
@@ -154,47 +151,67 @@ def run_ssh_control():
 # HAND MODE
 # ========================================================
 def handle_hand_payload(merged_byte, flex_low):
-    global _drive_hist, _ignore_ultra, last_rx
+    global _drive_hist, _ignore_ultra, last_rx, _arm_dir
     
-    # FIXED: Correct bit extraction
     rollBits = (merged_byte >> 2) & 0x03
     pitchBits = merged_byte & 0x03
     modeBit = (merged_byte >> 6) & 0x01
     
-    # FIXED: Fingers 0-3 from flex_low, Finger 4 from merged_byte bits 4-5
     f_2b = [(flex_low >> (i * 2)) & 0x03 for i in range(4)]
     f_2b.append((merged_byte >> 4) & 0x03)
 
-    piano_player.set_states(f_2b)
+    if modeBit == 1:
+        # --- MODE 1: HAND/SERVO CONTROL ---
+        # Update fingers, completely stop chassis and arm
+        piano_player.set_states(f_2b)
+        
+        chassis.stop_drive()
+        _arm_dir = 0
+        req = "STOP"
+        too_close = False
+        ign = False
+        
+    else:
+        # --- MODE 0: DRIVE & ARM CONTROL ---
+        # Ignore piano_player updates
+        
+        # Arm Logic: F1 (Index) up, F2 (Middle) down
+        if f_2b[1] >= 2:
+            _arm_dir = 1
+        elif f_2b[2] >= 2:
+            _arm_dir = -1
+        else:
+            _arm_dir = 0
+            
+        # Drive Logic: Pitch/Roll
+        req = "STOP"
+        if pitchBits == 0b01:     req = "FWD"
+        elif pitchBits == 0b10:   req = "REV"
+        elif rollBits == 0b01:    req = "RIGHT"
+        elif rollBits == 0b10:    req = "LEFT"
+            
+        too_close = chassis.obstacle_too_close()
+        
+        if _ignore_ultra[0] and (req in ("STOP", "REV") or req != _ignore_ultra[1]): 
+            _ignore_ultra[0] = False
+            
+        if (not _ignore_ultra[0]) and req in {"FWD", "LEFT", "RIGHT"}:
+            if _drive_hist[1] == "STOP" and _drive_hist[0] == req: 
+                _ignore_ultra[:] = [True, req]
 
-    req = "STOP"
-    if pitchBits == 0b01:     req = "FWD"
-    elif pitchBits == 0b10:   req = "REV"
-    elif rollBits == 0b01:    req = "RIGHT"
-    elif rollBits == 0b10:    req = "LEFT"
+        ign = (_ignore_ultra[0] and req == _ignore_ultra[1])
         
-    too_close = chassis.obstacle_too_close()
-    
-    if _ignore_ultra[0] and (req in ("STOP", "REV") or req != _ignore_ultra[1]): 
-        _ignore_ultra[0] = False
-        
-    if (not _ignore_ultra[0]) and req in {"FWD", "LEFT", "RIGHT"}:
-        if _drive_hist[1] == "STOP" and _drive_hist[0] == req: 
-            _ignore_ultra[:] = [True, req]
-
-    ign = (_ignore_ultra[0] and req == _ignore_ultra[1])
-    
-    if req == "REV": chassis.drive_reverse()
-    elif req == "FWD": chassis.drive_forward() if (not too_close or ign) else chassis.stop_drive()
-    elif req == "LEFT": chassis.turn_left() if (not too_close or ign) else chassis.stop_drive()
-    elif req == "RIGHT": chassis.turn_right() if (not too_close or ign) else chassis.stop_drive()
-    else: chassis.stop_drive()
-        
-    if req != _drive_hist[1]: _drive_hist = [_drive_hist[1], req]
-        
+        if req == "REV": chassis.drive_reverse()
+        elif req == "FWD": chassis.drive_forward() if (not too_close or ign) else chassis.stop_drive()
+        elif req == "LEFT": chassis.turn_left() if (not too_close or ign) else chassis.stop_drive()
+        elif req == "RIGHT": chassis.turn_right() if (not too_close or ign) else chassis.stop_drive()
+        else: chassis.stop_drive()
+            
+        if req != _drive_hist[1]: _drive_hist = [_drive_hist[1], req]
+            
     last_rx = time.time()
     
-    print(f"[RX] R: {rollBits:02b} | P: {pitchBits:02b} | F: {f_2b} | Cmd: {req} | Close: {too_close} | Ign: {ign}")
+    print(f"[RX] MODE: {modeBit} | R: {rollBits:02b} P: {pitchBits:02b} | F: {f_2b} | Cmd: {req} | Arm: {_arm_dir}")
 
 def run_hand_ssh_control():
     def getch():
@@ -259,7 +276,6 @@ if __name__ == "__main__":
                             if ready[0]:
                                 data, addr = sock.recvfrom(1024)
                                 if len(data) >= 2:
-                                    # FIXED: Passes data[0] (mergedByte) first, then data[1] (flexLow)
                                     handle_payload(data[0], data[1], 0, 0)
                                     
                             if time.time() - last_rx > 0.7: 
@@ -312,6 +328,7 @@ if __name__ == "__main__":
                 try:
                     chassis.init(factory, pi_enc)
                     piano_player.init(factory)
+                    arm.init(factory) # <-- Added so the arm works in Mode 0
 
                     ctrl_mode = input("Select control: Keyboard (k), Arduino (a), or WiFi (w)?\n").strip().lower()
 
@@ -327,16 +344,21 @@ if __name__ == "__main__":
                         
                         while True:
                             chassis.ultrasonic_tick()
+                            
+                            # <-- Added Arm execute logic here
+                            if _arm_dir != 0: arm.run(_arm_dir == 1)
+                            else: arm.stop()
                                 
                             ready = select.select([sock], [], [], 0.01)
                             if ready[0]:
                                 data, addr = sock.recvfrom(1024)
                                 if len(data) >= 2:
-                                    # FIXED: Passes data[0] (mergedByte) first, then data[1] (flexLow)
                                     handle_hand_payload(data[0], data[1])
                                     
                             if time.time() - last_rx > 0.7: 
                                 chassis.stop_drive()
+                                _arm_dir = 0
+                                piano_player.set_states([0,0,0,0,0]) # Reset fingers on timeout
                                 print("[WARNING] Connection Lost. Forcing ZERO payload.")
                                 handle_hand_payload(0, 0) 
                                 time.sleep(0.5) 
@@ -350,6 +372,10 @@ if __name__ == "__main__":
                         
                         while True:
                             chassis.ultrasonic_tick()
+                            
+                            # <-- Added Arm execute logic here
+                            if _arm_dir != 0: arm.run(_arm_dir == 1)
+                            else: arm.stop()
                             
                             if ser.in_waiting > 0:
                                 line = ser.readline().decode('utf-8', errors='ignore').strip()
@@ -365,6 +391,8 @@ if __name__ == "__main__":
                                         
                             if time.time() - last_rx > 0.7: 
                                 chassis.stop_drive()
+                                _arm_dir = 0
+                                piano_player.set_states([0,0,0,0,0]) # Reset fingers on timeout
                                 print("[WARNING] Connection Lost. Forcing ZERO payload.")
                                 handle_hand_payload(0, 0) 
                                 time.sleep(0.5) 
@@ -374,6 +402,7 @@ if __name__ == "__main__":
                 except Exception as e: print(f"[ERROR] HAND mode: {e}")
                 finally:
                     chassis.stop_drive(); chassis.close_pins(); piano_player.close_pins()
+                    arm.close_pins() # <-- Clean up the arm pins!
                     if 'ser' in locals() and hasattr(ser, 'is_open') and ser.is_open: ser.close()
                     if 'sock' in locals(): sock.close()
                     
