@@ -228,30 +228,30 @@ void setup() {
   ori.yaw = magYaw(mag, ori.roll, ori.pitch);
   ref = ori;
 
-  // --- WIFI & UDP SETUP ---
-  // WiFi.begin(ssid, password);
-  // while (WiFi.status() != WL_CONNECTED) {
-  //   delay(500);
-  //   Serial.print(".");
-  // }
-  // Serial.println("\nWiFi Connected!");
-  // Serial.print("ESP IP: ");
-  // Serial.println(WiFi.localIP());
+  //--- WIFI & UDP SETUP ---
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("\nWiFi Connected!");
+  Serial.print("ESP IP: ");
+  Serial.println(WiFi.localIP());
 
-  // MDNS.begin("esp32-glove");
-  // resolvedPiIP = MDNS.queryHost(piHostname);
-  // while (resolvedPiIP.toString() == "0.0.0.0") {
-  //   delay(1000);
-  //   resolvedPiIP = MDNS.queryHost(piHostname);
-  //   Serial.println("Resolving Pi IP...");
-  // }
+  MDNS.begin("esp32-glove");
+  resolvedPiIP = MDNS.queryHost(piHostname);
+  while (resolvedPiIP.toString() == "0.0.0.0") {
+    delay(1000);
+    resolvedPiIP = MDNS.queryHost(piHostname);
+    Serial.println("Resolving Pi IP...");
+  }
 
-  // Serial.print("Resolved Pi IP: ");
-  // Serial.println(resolvedPiIP);
-  // Serial.print("UDP destination port: ");
-  // Serial.println(udpPort);
+  Serial.print("Resolved Pi IP: ");
+  Serial.println(resolvedPiIP);
+  Serial.print("UDP destination port: ");
+  Serial.println(udpPort);
 
-  // udp.begin(udpPort);
+  udp.begin(udpPort);
   lastTime = micros();
 }
 
@@ -323,10 +323,10 @@ void loop() {
       // Create a 2-byte buffer, dropping the AA/55 boundary bytes
       uint8_t buf[2] = { mergedByte, flexLow };
       
-      // udp.beginPacket(resolvedPiIP, udpPort);
-      // udp.write(buf, sizeof(buf));++++
+      udp.beginPacket(resolvedPiIP, udpPort);
+      udp.write(buf, sizeof(buf));
 
-      // udp.endPacket();
+      udp.endPacket();
       
       lastPacketWasZero = isZeroPacket;
     }

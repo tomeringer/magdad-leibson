@@ -70,14 +70,18 @@ def bring_bottle_xz():
             return
         time.sleep(0.1)
 
-def handle_payload(b1, b2, b3, b4):
+def handle_payload(merged_byte, flex_low, *args):
     global _drive_hist, _ignore_ultra, last_rx, _arm_dir, _prev_f
 
-    rollBits = (b2 >> 2) & 0x03
-    pitchBits = (b2 >> 4) & 0x03
+    # Fixed Bit Extraction
+    rollBits = (merged_byte >> 2) & 0x03
+    pitchBits = merged_byte & 0x03
+    modeBit = (merged_byte >> 6) & 0x01
 
-    flex_data = (b2 << 8) | b1
-    f_2b = [(flex_data >> (i * 2)) & 0x03 for i in range(5)]
+    # Extract Fingers 0-3 from flex_low, and Finger 4 from merged_byte
+    f_2b = [(flex_low >> (i * 2)) & 0x03 for i in range(4)]
+    f_2b.append((merged_byte >> 4) & 0x03)
+    
     f = [0 if (val <= 1) else 1 for val in f_2b] 
 
     if all(f) and not all(_prev_f):
@@ -148,14 +152,17 @@ def run_ssh_control():
 # ========================================================
 # HAND MODE
 # ========================================================
-def handle_hand_payload(b1, b2, b3, b4):
+def handle_hand_payload(merged_byte, flex_low, *args):
     global _drive_hist, _ignore_ultra, last_rx
     
-    rollBits = (b2 >> 2) & 0x03
-    pitchBits = (b2 >> 4) & 0x03
+    # Fixed Bit Extraction
+    rollBits = (merged_byte >> 2) & 0x03
+    pitchBits = merged_byte & 0x03
+    modeBit = (merged_byte >> 6) & 0x01
     
-    flex_data = (b2 << 8) | b1
-    f_2b = [(flex_data >> (i * 2)) & 0x03 for i in range(5)]
+    # Extract Fingers 0-3 from flex_low, and Finger 4 from merged_byte
+    f_2b = [(flex_low >> (i * 2)) & 0x03 for i in range(4)]
+    f_2b.append((merged_byte >> 4) & 0x03)
 
     piano_player.set_states(f_2b)
 
@@ -251,14 +258,14 @@ if __name__ == "__main__":
                             if ready[0]:
                                 data, addr = sock.recvfrom(1024)
                                 if len(data) >= 2:
-                                    # Passing data[1] (flexLow) as b1, data[0] (mergedByte) as b2 to match Arduino format
-                                    handle_payload(data[1], data[0], 0, 0)
+                                    # Passing data[0] (mergedByte), data[1] (flexLow)
+                                    handle_payload(data[0], data[1])
                                     
                             # Safety Timeout Mechanism
                             if time.time() - last_rx > 0.7: 
                                 chassis.stop_drive()
                                 print("[WARNING] Connection Lost. Forcing ZERO payload.")
-                                handle_payload(0, 0, 0, 0) # Sending zero data
+                                handle_payload(0, 0)
                                 time.sleep(0.5)
                                 
                     else:
@@ -280,8 +287,9 @@ if __name__ == "__main__":
                                     if line.startswith("DATA:"):
                                         try:
                                             parts = line.split(":")[1].split(",")
-                                            if len(parts) == 4:
-                                                handle_payload(*[int(x) for x in parts])
+                                            if len(parts) >= 2:
+                                                # Arduino prints mergedByte, flexLow
+                                                handle_payload(int(parts[0]), int(parts[1]))
                                         except Exception: pass
                                     else:
                                         print(f"[ARDUINO MSG] {line}")
@@ -290,7 +298,7 @@ if __name__ == "__main__":
                             if time.time() - last_rx > 0.7: 
                                 chassis.stop_drive()
                                 print("[WARNING] Connection Lost. Forcing ZERO payload.")
-                                handle_payload(0, 0, 0, 0) 
+                                handle_payload(0, 0) 
                                 time.sleep(0.5) 
                             time.sleep(0.01)
                             
@@ -326,14 +334,14 @@ if __name__ == "__main__":
                             if ready[0]:
                                 data, addr = sock.recvfrom(1024)
                                 if len(data) >= 2:
-                                    # Passing data[1] (flexLow) as b1, data[0] (mergedByte) as b2 to match Arduino format
-                                    handle_hand_payload(data[1], data[0], 0, 0)
+                                    # Passing data[0] (mergedByte), data[1] (flexLow)
+                                    handle_hand_payload(data[0], data[1])
                                     
                             # Safety Timeout Mechanism
                             if time.time() - last_rx > 0.7: 
                                 chassis.stop_drive()
                                 print("[WARNING] Connection Lost. Forcing ZERO payload.")
-                                handle_hand_payload(0, 0, 0, 0) 
+                                handle_hand_payload(0, 0) 
                                 time.sleep(0.5) 
                                 
                     else: 
@@ -352,8 +360,9 @@ if __name__ == "__main__":
                                     if line.startswith("DATA:"):
                                         try:
                                             parts = line.split(":")[1].split(",")
-                                            if len(parts) == 4:
-                                                handle_hand_payload(*[int(x) for x in parts])
+                                            if len(parts) >= 2:
+                                                # Arduino prints mergedByte, flexLow
+                                                handle_hand_payload(int(parts[0]), int(parts[1]))
                                         except Exception: pass
                                     else:
                                         print(f"[ARDUINO MSG] {line}")
@@ -362,7 +371,7 @@ if __name__ == "__main__":
                             if time.time() - last_rx > 0.7: 
                                 chassis.stop_drive()
                                 print("[WARNING] Connection Lost. Forcing ZERO payload.")
-                                handle_hand_payload(0, 0, 0, 0) 
+                                handle_hand_payload(0, 0) 
                                 time.sleep(0.5) 
                             time.sleep(0.01)
 
