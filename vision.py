@@ -2,8 +2,6 @@ import os
 import time
 import math
 import pickle
-import subprocess
-import tempfile
 import cv2
 import numpy as np
 from ultralytics import YOLO
@@ -13,7 +11,7 @@ from ultralytics import YOLO
 # ============================================================
 CAM_WIDTH = 640
 CAM_HEIGHT = 480
-CAM_FPS = 5
+CAM_FPS = 15
 DEFAULT_IMG_SIZE = (CAM_WIDTH, CAM_HEIGHT)
 
 BOTTLE_CLASS_ID = 39
@@ -33,6 +31,8 @@ CALIBRATION_FILE_PATH = "Autonomy/stereo_calibration.pkl"
 # ============================================================
 _vision_ready = False
 _model = None
+_cap_l = None
+_cap_r = None
 _maps_l = None
 _maps_r = None
 _Q = None
@@ -47,27 +47,81 @@ def wait_for_symlink(symlink_path, timeout=15):
         time.sleep(0.5)
     return False
 
-def capture_frame(device_path: str) -> np.ndarray | None:
-    """Capture a single frame from a camera using v4l2-ctl."""
-    with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as f:
-        tmp_path = f.name
-    try:
-        subprocess.run([
-            'v4l2-ctl',
-            f'--device={os.path.realpath(device_path)}',
-            f'--set-fmt-video=width={CAM_WIDTH},height={CAM_HEIGHT},pixelformat=MJPG',
-            '--stream-mmap',
-            '--stream-count=1',
-            f'--stream-to={tmp_path}'
-        ], check=True, capture_output=True)
-        frame = cv2.imdecode(np.fromfile(tmp_path, dtype=np.uint8), cv2.IMREAD_COLOR)
-        return frame
-    except subprocess.CalledProcessError as e:
-        print(f"[CAM] capture_frame failed for {device_path}: {e.stderr.decode()}", flush=True)
-        return None
-    finally:
-        os.unlink(tmp_path)
+def path_to_index(symlink_path):
+    """Resolve symlink and extract the numeric index OpenCV wants."""
+    real_path = os.path.realpath(symlink_path)  # e.g. /dev/video4
+    if not real_path.startswith("/dev/video"):
+        raise RuntimeError(f"Unexpected device path: {real_path}")
+    return int(real_path.replace("/dev/video", ""))  # e.g. 4
 
+def open_cam1(path: str, name: str) -> cv2.VideoCapture:
+    if not wait_for_symlink(path, timeout=15):
+        raise RuntimeError(f"Symlink never appeared: {path}")
+
+    cap = None
+    for _ in range(10):
+        index = path_to_index(path)
+        cap = cv2.VideoCapture(index, cv2.CAP_V4L2)
+        if cap.isOpened():
+            print(f"[CAM] Opened {path} -> {index}")
+            break
+        time.sleep(1)
+
+    print(f"[CAM] {name}: opening {path} isOpened={cap.isOpened()}", flush=True)
+    if not cap.isOpened():
+        return cap
+
+    cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter.fourcc('M', 'J', 'P', 'G'))
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, CAM_WIDTH)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAM_HEIGHT)
+    cap.set(cv2.CAP_PROP_FPS, CAM_FPS)
+    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
+    # for _ in range(10):
+    #     cap.read()
+
+    print(f"[CAM] {name}: negotiated "
+          f"{cap.get(cv2.CAP_PROP_FRAME_WIDTH):.0f}x{cap.get(cv2.CAP_PROP_FRAME_HEIGHT):.0f} "
+          f"@ {cap.get(cv2.CAP_PROP_FPS):.1f}fps", flush=True)
+    return cap
+
+def open_cam(path: str, name: str) -> cv2.VideoCapture:
+    # Block until the symlink exists
+    if not wait_for_symlink(path, timeout=15):
+        raise RuntimeError(f"Symlink never appeared: {path}")
+
+    cap = None
+    for _ in range(10):
+        index = path_to_index(path)
+        cap = cv2.VideoCapture(index, cv2.CAP_V4L2)
+        if cap.isOpened():
+            print(f"[CAM] Opened {path} -> {index}")
+            break
+        time.sleep(1)
+
+    if not cap.isOpened():
+        print(f"[CAM] {name}: opening {path} failed.", flush=True)
+        return cap
+
+    # Force MJPG compression using the standard explicit syntax
+    cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, CAM_WIDTH)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAM_HEIGHT)
+    cap.set(cv2.CAP_PROP_FPS, CAM_FPS)
+    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
+    # Verify which format the camera actually accepted
+    actual_fourcc = int(cap.get(cv2.CAP_PROP_FOURCC))
+    decoded_fourcc = "".join([chr((actual_fourcc >> 8 * i) & 0xFF) for i in range(4)])
+
+    print(f"[CAM] {name}: negotiated "
+          f"{cap.get(cv2.CAP_PROP_FRAME_WIDTH):.0f}x{cap.get(cv2.CAP_PROP_FRAME_HEIGHT):.0f} "
+          f"@ {cap.get(cv2.CAP_PROP_FPS):.1f}fps | Codec: {decoded_fourcc}", flush=True)
+          
+    if decoded_fourcc != "MJPG":
+        print(f"[WARNING] {name} camera ignored MJPG request and fell back to {decoded_fourcc}!")
+
+    return cap
 
 def load_and_prepare_calibration(file_path: str):
     try:
@@ -115,31 +169,41 @@ def hard_reset_usb_all() -> None:
 
 
 def init() -> None:
-    global _vision_ready, _model, _maps_l, _maps_r, _Q
+    global _vision_ready, _model, _cap_l, _cap_r, _maps_l, _maps_r, _Q
     if _vision_ready:
         return
 
     hard_reset_usb_all()
 
-    if not wait_for_symlink(LEFT_CAM_PATH) or not wait_for_symlink(RIGHT_CAM_PATH):
-        raise RuntimeError("One or both camera symlinks never appeared.")
-
     print("[VISION] Initializing YOLO + stereo...", flush=True)
     _model = YOLO('Autonomy/yolov8n_ncnn_model', task='detect')
+
+    _cap_l = open_cam(LEFT_CAM_PATH, "LEFT")
+    time.sleep(2)
+    _cap_r = open_cam(RIGHT_CAM_PATH, "RIGHT")
+    if not _cap_l.isOpened() or not _cap_r.isOpened():
+        raise RuntimeError("One or both cameras failed to open.")
 
     _maps_l, _maps_r, _Q = load_and_prepare_calibration(CALIBRATION_FILE_PATH)
     _vision_ready = True
     print("[VISION] Ready.", flush=True)
 
 
+def read_latest_stereo(cap_l: cv2.VideoCapture, cap_r: cv2.VideoCapture, flush_n: int = 10) -> tuple:
+    for _ in range(flush_n):
+        cap_l.grab()
+        cap_r.grab()
+    ret_l, frame_l = cap_l.retrieve()
+    ret_r, frame_r = cap_r.retrieve()
+    return ret_l, frame_l, ret_r, frame_r
+
+
 def detect_bottle_once() -> dict:
-    global _model, _maps_l, _maps_r, _Q
+    global _model, _cap_l, _cap_r, _maps_l, _maps_r, _Q
     t0 = time.perf_counter()
+    ret_l, frame_l_orig, ret_r, frame_r_orig = read_latest_stereo(_cap_l, _cap_r, flush_n=5)
 
-    frame_l_orig = capture_frame(LEFT_CAM_PATH)
-    frame_r_orig = capture_frame(RIGHT_CAM_PATH)
-
-    if frame_l_orig is None or frame_r_orig is None:
+    if not ret_l or not ret_r:
         return {"found": False, "err": "Failed to read frames", "t_proc": time.perf_counter() - t0}
 
     frame_l = cv2.remap(frame_l_orig, _maps_l[0], _maps_l[1], cv2.INTER_LINEAR)
@@ -190,6 +254,20 @@ def detect_bottle_once() -> dict:
 
 
 def shutdown() -> None:
-    global _vision_ready
+    global _vision_ready, _cap_l, _cap_r
+    
+    # Release hardware and reset the variables to None
+    if _cap_l is not None: 
+        _cap_l.release()
+        _cap_l = None
+        
+    if _cap_r is not None: 
+        _cap_r.release()
+        _cap_r = None
+        
+    cv2.destroyAllWindows()
+    
+    # Crucial: Reset the flag so init() knows it has to start over next time
     _vision_ready = False
-    print("[VISION] Shutdown complete.")
+    
+    print("[VISION] Shutdown complete. Cameras released.")
