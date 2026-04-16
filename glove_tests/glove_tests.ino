@@ -1,7 +1,8 @@
 #include <Arduino.h>
 
 constexpr int NUM_FLEX = 5; 
-int flexPins[NUM_FLEX] = {A0, A2, A1, A3, A7}; 
+// REORDERED PINS: f0(A3), f1(A0), f2(A2), f3(A7), f4(A1)
+int flexPins[NUM_FLEX] = {A3, A0, A2, A7, A1}; 
 
 constexpr float R_FIXED = 47000.0f;
 constexpr float V_IN = 3.3f;

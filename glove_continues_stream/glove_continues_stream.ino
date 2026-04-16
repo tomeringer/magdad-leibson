@@ -4,8 +4,10 @@
 //                  SYSTEM CONFIGURATION
 // ========================================================
 constexpr int NUM_FLEX = 5; 
-int flexPins[NUM_FLEX] = {A0, A2, A1, A3, A7}; 
-int servoPins[NUM_FLEX] = {D2, D3, D4, D5, D6}; 
+// REORDERED PINS: f0(A3), f1(A0), f2(A2), f3(A7), f4(A1)
+int flexPins[NUM_FLEX] = {A3, A0, A2, A7, A1}; 
+// Reordered servos to stay paired with their respective fingers:
+int servoPins[NUM_FLEX] = {D5, D2, D3, D6, D4}; 
 int pwmChannels[NUM_FLEX] = {0, 1, 2, 3, 4}; 
 
 constexpr float R_FIXED = 47000.0f;
@@ -14,50 +16,51 @@ constexpr float V_IN = 3.3f;
 // ========================================================
 //        SERVO CALIBRATION (MANUAL OFFSETS)
 // ========================================================
-// Adjust these values (positive or negative) to find the true "zero" for each finger.
-int servoOffsets[NUM_FLEX] = {80, 85, 120, 90, 80}; 
+// Reordered offsets to match the new finger order
+int servoOffsets[NUM_FLEX] = {90, 80, 85, 80, 120}; 
 const int SERVO_STATES[4] = {0, -13, -27, -40};
 int currentStates[NUM_FLEX] = {0, 0, 0, 0, 0};
+
 //אצבע משולשת לתקן כיול
 //זרת לתקן כיול
 // לשנות זוויות בעבור אצבע המורה
 // אצבע המורה לתקן כיול
 
-
 // ========================================================
 //        CALIBRATED THRESHOLDS & HYSTERESIS
 // ========================================================
-// tring manualy
+// Statistically calculated Thresholds (Reordered to match new pins)
 // float THRESHOLDS[NUM_FLEX][3] = {
-//   {37002.4f, 45115.9f, 59251.9f},
-//   {18688.8f, 26000.0f, 35000.2f},
-//   {19430.9f, 26701.9f, 40450.2f},
-//   {25493.6f, 30308.9f, 38821.2f},
-//   {12044.7f, 14235.7f, 19452.4f}
+//   {28157.5f, 32627.5f, 42820.8f}, // f0 (A3)
+//   {38406.8f, 49937.3f, 75488.9f}, // f1 (A0)
+//   {20396.7f, 27556.0f, 44790.9f}, // f2 (A2)
+//   {13922.7f, 17090.8f, 26576.7f}, // f3 (A7)
+//   {22969.2f, 30980.6f, 47308.5f}  // f4 (A1)
 // };
 
-// // Updated to 2D Array
+// // Expanded Hysteresis Matrix (Reordered to match new pins)
 // float HYSTERESIS[NUM_FLEX][3] = {
-//   {1500.0f, 1500.0f, 1500.0f},
-//   {1000.0f, 1000.0f, 1000.0f},
-//   {1000.0f, 1000.0f, 1000.0f},
-//   {857.6f,  857.6f,  857.6f},
-//   {700.0f,  700.0f,  700.0f}
+//   {3310.0f,  935.5f,  9082.1f},   // f0 (A3)
+//   {1878.9f, 9429.3f, 14966.5f},   // f1 (A0)
+//   {1488.4f, 5537.5f, 11153.6f},   // f2 (A2)
+//   { 927.4f, 2185.0f,  7134.9f},   // f3 (A7)
+//   {3367.6f, 3961.3f, 12128.7f}    // f4 (A1)
 // };
+
 float THRESHOLDS[NUM_FLEX][3] = {
-  {38406.8f, 49937.3f, 75488.9f},
-  {20396.7f, 27556.0f, 44790.9f},
-  {22969.2f, 30980.6f, 47308.5f},
-  {28157.5f, 32627.5f, 42820.8f},
-  {13922.7f, 17090.8f, 26576.7f}
+  {26485.3f, 32603.6f, 40369.7f}, // f0 (A3)       
+  {37688.6f, 53299.8f, 77914.6f}, // f1 (A0)       
+  {20447.2f, 30992.2f, 46028.6f}, // f2 (A2)       
+  {15006.7f, 20655.7f, 29523.2f}, // f3 (A7)       
+  {23089.4f, 33341.3f, 46980.6f}  // f4 (A1)       
 };
 
 float HYSTERESIS[NUM_FLEX][3] = {
-  {1878.9f, 9429.3f, 14966.5f},
-  {1488.4f, 5537.5f, 11153.6f},
-  {3367.6f, 3961.3f, 12128.7f},
-  {3310.0f, 935.5f, 9082.1f},
-  {927.4f, 2185.0f, 7134.9f}
+  {3169.5f, 1543.5f, 4551.7f}, // f0 (A3)
+  {6214.7f, 7303.7f, 14451.8f}, // f1 (A0)
+  {3850.7f, 5570.2f, 7433.3f}, // f2 (A2)
+  {2289.7f, 2777.2f, 5202.9f}, // f3 (A7)
+  {4388.2f, 4579.6f, 7535.8f}  // f4 (A1)
 };
 // ========================================================
 
