@@ -13,6 +13,9 @@ NUM_FINGERS = 5
 STATES = [0, 1, 2, 3]
 STATE_NAMES = ["0 (Flat/0°)", "1 (20°)", "2 (40°)", "3 (Bent/60°)"]
 
+# Added Pin Names so the generated arrays are commented perfectly
+PIN_NAMES = ["A3", "A0", "A2", "A7", "A1"]
+
 data = {f: {s: [] for s in STATES} for f in range(NUM_FINGERS)}
 
 def collect_data():
@@ -124,15 +127,16 @@ def analyze_and_generate_code():
             axes[i].axvline(x=T, color='black', linestyle='--', linewidth=1.5)
             axes[i].axvspan(T - H, T + H, color='gray', alpha=0.2)
             
-        axes[i].set_title(f"Finger {i} Quartile Distributions")
+        # Updated Title to include Pin name
+        axes[i].set_title(f"Finger {i} ({PIN_NAMES[i]}) Quartile Distributions")
         axes[i].legend(loc="upper left", fontsize='small')
         
-        # Format C++ Output
+        # Format C++ Output with commented Pin labels
         thresholds_cpp += f"  {{{T1:.1f}f, {T2:.1f}f, {T3:.1f}f}}"
-        thresholds_cpp += ",\n" if i < NUM_FINGERS - 1 else "\n"
+        thresholds_cpp += f", // f{i} ({PIN_NAMES[i]})\n" if i < NUM_FINGERS - 1 else f"  // f{i} ({PIN_NAMES[i]})\n"
         
         hysteresis_cpp += f"  {{{h1:.1f}f, {h2:.1f}f, {h3:.1f}f}}"
-        hysteresis_cpp += ",\n" if i < NUM_FINGERS - 1 else "\n"
+        hysteresis_cpp += f", // f{i} ({PIN_NAMES[i]})\n" if i < NUM_FINGERS - 1 else f"  // f{i} ({PIN_NAMES[i]})\n"
 
     thresholds_cpp += "};\n"
     hysteresis_cpp += "};\n"

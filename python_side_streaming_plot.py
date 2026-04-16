@@ -7,44 +7,44 @@ from collections import deque
 import math
 
 # --- CONFIGURATION ---
-SERIAL_PORT = 'COM6'  
+SERIAL_PORT = 'COM6'  # <-- Double check your COM port
 BAUD_RATE = 115200
 NUM_FLEX = 5  
 WINDOW_SIZE = 150  
 
 # --- IMPORT THRESHOLDS AND HYSTERESIS FROM CALIBRATION ---
+# Reordered perfectly to match the ESP32: f0(A3), f1(A0), f2(A2), f3(A7), f4(A1)
 
 # THRESHOLDS = [
-#     [37002.4, 45115.9, 59251.9],
-#     [18688.8, 26000.0, 35000.2],
-#     [19430.9, 26701.9, 40450.2],
-#     [25493.6, 30308.9, 38821.2],
-#     [12044.7, 14235.7, 19452.4]
+#     [28157.5, 32627.5, 42820.8], # f0 (A3)
+#     [38406.8, 49937.3, 75488.9], # f1 (A0)
+#     [20396.7, 27556.0, 44790.9], # f2 (A2)
+#     [13922.7, 17090.8, 26576.7], # f3 (A7)
+#     [22969.2, 30980.6, 47308.5]  # f4 (A1)
 # ]
 
-# # Updated to 2D Array
 # HYSTERESIS = [
-#     [1500.0, 1500.0, 1500.0],
-#     [1000.0, 1000.0, 1000.0],
-#     [1000.0, 1000.0, 1000.0],
-#     [857.6,  857.6,  857.6],
-#     [700.0,  700.0,  700.0]
+#     [3310.0, 935.5, 9082.1],   # f0 (A3)
+#     [1878.9, 9429.3, 14966.5],   # f1 (A0)
+#     [1488.4, 5537.5, 11153.6],   # f2 (A2)
+#     [927.4, 2185.0, 7134.9],     # f3 (A7)
+#     [3367.6, 3961.3, 12128.7]    # f4 (A1)
 # ]
 
 THRESHOLDS = [
-    [38406.8, 49937.3, 75488.9],
-    [20396.7, 27556.0, 44790.9],
-    [22969.2, 30980.6, 47308.5],
-    [28157.5, 32627.5, 42820.8],
-    [13922.7, 17090.8, 26576.7]
+    [26485.3, 32603.6, 40369.7], # f0 (A3)       
+    [37688.6, 53299.8, 77914.6], # f1 (A0)       
+    [20447.2, 30992.2, 46028.6], # f2 (A2)       
+    [15006.7, 20655.7, 29523.2], # f3 (A7)       
+    [23089.4, 33341.3, 46980.6]  # f4 (A1)       
 ]
 
 HYSTERESIS = [
-    [1878.9, 9429.3, 14966.5],
-    [1488.4, 5537.5, 11153.6],
-    [3367.6, 3961.3, 12128.7],
-    [3310.0, 935.5, 9082.1],
-    [927.4, 2185.0, 7134.9]
+    [3169.5, 1543.5, 4551.7],  # f0 (A3)
+    [6214.7, 7303.7, 14451.8], # f1 (A0)
+    [3850.7, 5570.2, 7433.3],  # f2 (A2)
+    [2289.7, 2777.2, 5202.9],  # f3 (A7)
+    [4388.2, 4579.6, 7535.8]   # f4 (A1)
 ]
 
 # --- DATA STRUCTURES ---
@@ -54,7 +54,6 @@ data_s = [deque([0]*WINDOW_SIZE, maxlen=WINDOW_SIZE) for _ in range(NUM_FLEX)]
 
 # Track dynamic min/max for auto-scaling Y-limits. 
 # Initialized to threshold boundaries so the thresholds are always visible on screen.
-# Updated to pull index 0 and 2 from the 2D HYSTERESIS array
 y_min_track = [THRESHOLDS[i][0] - HYSTERESIS[i][0] - 2000 for i in range(NUM_FLEX)]
 y_max_track = [THRESHOLDS[i][2] + HYSTERESIS[i][2] + 2000 for i in range(NUM_FLEX)]
 

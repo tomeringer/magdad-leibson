@@ -79,22 +79,39 @@ constexpr float V_IN = 3.3f;
 float flexR[NUM_FLEX];
 
 // Statistically calculated Thresholds (Reordered to match new pins)
+// float THRESHOLDS[NUM_FLEX][3] = {
+//   {28157.5f, 32627.5f, 42820.8f}, // f0 (A3)
+//   {38406.8f, 49937.3f, 75488.9f}, // f1 (A0)
+//   {20396.7f, 27556.0f, 44790.9f}, // f2 (A2)
+//   {13922.7f, 17090.8f, 26576.7f}, // f3 (A7)
+//   {22969.2f, 30980.6f, 47308.5f}  // f4 (A1)
+// };
+
+// // Expanded Hysteresis Matrix (Reordered to match new pins)
+// float HYSTERESIS[NUM_FLEX][3] = {
+//   {3310.0f,  935.5f,  9082.1f},   // f0 (A3)
+//   {1878.9f, 9429.3f, 14966.5f},   // f1 (A0)
+//   {1488.4f, 5537.5f, 11153.6f},   // f2 (A2)
+//   { 927.4f, 2185.0f,  7134.9f},   // f3 (A7)
+//   {3367.6f, 3961.3f, 12128.7f}    // f4 (A1)
+// };
+
 float THRESHOLDS[NUM_FLEX][3] = {
-  {28157.5f, 32627.5f, 42820.8f}, // f0 (A3)
-  {38406.8f, 49937.3f, 75488.9f}, // f1 (A0)
-  {20396.7f, 27556.0f, 44790.9f}, // f2 (A2)
-  {13922.7f, 17090.8f, 26576.7f}, // f3 (A7)
-  {22969.2f, 30980.6f, 47308.5f}  // f4 (A1)
+  {26485.3f, 32603.6f, 40369.7f}, // f0 (A3)       
+  {37688.6f, 53299.8f, 77914.6f}, // f1 (A0)       
+  {20447.2f, 30992.2f, 46028.6f}, // f2 (A2)       
+  {15006.7f, 20655.7f, 29523.2f}, // f3 (A7)       
+  {23089.4f, 33341.3f, 46980.6f}  // f4 (A1)       
 };
 
-// Expanded Hysteresis Matrix (Reordered to match new pins)
 float HYSTERESIS[NUM_FLEX][3] = {
-  {3310.0f,  935.5f,  9082.1f},   // f0 (A3)
-  {1878.9f, 9429.3f, 14966.5f},   // f1 (A0)
-  {1488.4f, 5537.5f, 11153.6f},   // f2 (A2)
-  { 927.4f, 2185.0f,  7134.9f},   // f3 (A7)
-  {3367.6f, 3961.3f, 12128.7f}    // f4 (A1)
+  {3169.5f, 1543.5f, 4551.7f}, // f0 (A3)
+  {6214.7f, 7303.7f, 14451.8f}, // f1 (A0)
+  {3850.7f, 5570.2f, 7433.3f}, // f2 (A2)
+  {2289.7f, 2777.2f, 5202.9f}, // f3 (A7)
+  {4388.2f, 4579.6f, 7535.8f}  // f4 (A1)
 };
+// =
 
 // Memory array for the state machine
 int currentStates[NUM_FLEX] = {0, 0, 0, 0, 0};
@@ -212,29 +229,29 @@ void setup() {
   ref = ori;
 
   // --- WIFI & UDP SETUP ---
-  WiFi.begin(ssid, password);
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-  Serial.println("\nWiFi Connected!");
-  Serial.print("ESP IP: ");
-  Serial.println(WiFi.localIP());
+  // WiFi.begin(ssid, password);
+  // while (WiFi.status() != WL_CONNECTED) {
+  //   delay(500);
+  //   Serial.print(".");
+  // }
+  // Serial.println("\nWiFi Connected!");
+  // Serial.print("ESP IP: ");
+  // Serial.println(WiFi.localIP());
 
-  MDNS.begin("esp32-glove");
-  resolvedPiIP = MDNS.queryHost(piHostname);
-  while (resolvedPiIP.toString() == "0.0.0.0") {
-    delay(1000);
-    resolvedPiIP = MDNS.queryHost(piHostname);
-    Serial.println("Resolving Pi IP...");
-  }
+  // MDNS.begin("esp32-glove");
+  // resolvedPiIP = MDNS.queryHost(piHostname);
+  // while (resolvedPiIP.toString() == "0.0.0.0") {
+  //   delay(1000);
+  //   resolvedPiIP = MDNS.queryHost(piHostname);
+  //   Serial.println("Resolving Pi IP...");
+  // }
 
-  Serial.print("Resolved Pi IP: ");
-  Serial.println(resolvedPiIP);
-  Serial.print("UDP destination port: ");
-  Serial.println(udpPort);
+  // Serial.print("Resolved Pi IP: ");
+  // Serial.println(resolvedPiIP);
+  // Serial.print("UDP destination port: ");
+  // Serial.println(udpPort);
 
-  udp.begin(udpPort);
+  // udp.begin(udpPort);
   lastTime = micros();
 }
 
@@ -306,9 +323,10 @@ void loop() {
       // Create a 2-byte buffer, dropping the AA/55 boundary bytes
       uint8_t buf[2] = { mergedByte, flexLow };
       
-      udp.beginPacket(resolvedPiIP, udpPort);
-      udp.write(buf, sizeof(buf));
-      udp.endPacket();
+      // udp.beginPacket(resolvedPiIP, udpPort);
+      // udp.write(buf, sizeof(buf));++++
+
+      // udp.endPacket();
       
       lastPacketWasZero = isZeroPacket;
     }
