@@ -102,11 +102,14 @@ def handle_payload(merged_byte, flex_low, b3=0, b4=0):
         if _arm_dir != 0:
             gripper.move_step(_arm_dir > 1)
 
+        # Drive Logic: Pitch/Roll
     req = "STOP"
-    if pitchBits == 0b01:     req = "FWD"
-    elif pitchBits == 0b10:   req = "REV"
-    elif rollBits == 0b01:    req = "RIGHT"
-    elif rollBits == 0b10:    req = "LEFT"
+    if pitchBits == 0b10:     req = "FWD"
+    elif pitchBits == 0b01:   req = "REV"
+    elif rollBits == 0b10:    req = "RIGHT"
+    elif rollBits == 0b01:    req = "LEFT"
+
+    
 
     too_close = chassis.obstacle_too_close()
 
@@ -201,10 +204,10 @@ def handle_hand_payload(merged_byte, flex_low, *args):
             
         # Drive Logic: Pitch/Roll
         req = "STOP"
-        if pitchBits == 0b01:     req = "FWD"
-        elif pitchBits == 0b10:   req = "REV"
-        elif rollBits == 0b01:    req = "RIGHT"
-        elif rollBits == 0b10:    req = "LEFT"
+        if pitchBits == 0b10:     req = "FWD"
+        elif pitchBits == 0b01:   req = "REV"
+        elif rollBits == 0b10:    req = "RIGHT"
+        elif rollBits == 0b01:    req = "LEFT"
             
         too_close = chassis.obstacle_too_close()
         
