@@ -33,7 +33,7 @@ ICM_20948_I2C imu;
 constexpr float ACC_MG_TO_G = 0.001f;
 constexpr float ALPHA_RP  = 0.98f;
 constexpr float ALPHA_YAW = 0.98f;
-constexpr float MAX_DT = 0.1f;
+constexpr float MAX_DT = 0.2f; //originally 0.1f
 
 constexpr float ROLL_TH  = 45.0f;
 constexpr float PITCH_TH = 30.0f;
@@ -234,7 +234,7 @@ void setup() {
   Serial.begin(115200);
   
   // חסימה למניעת קריסת ה-USB 
-  while (!Serial) { delay(10); } 
+  // while (!Serial) { delay(10); } 
   Serial.println("Glove System - Exact Logic with RF 433MHz Transmission");
 
   Wire.begin();
