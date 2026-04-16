@@ -114,7 +114,6 @@ def handle_payload(b1, b2, b3, b4):
     last_rx = time.time()
     _prev_f = f
 
-    # הוסרה מחיקת השורה (\r ו-end="") כדי שיודפס כשורה חדשה
     print(f"[RX] R: {rollBits:02b} | P: {pitchBits:02b} | F: {f_2b} | Cmd: {req} | Close: {too_close} | Ign: {ign}")
 
 def run_ssh_control():
@@ -182,7 +181,6 @@ def handle_hand_payload(b1, b2, b3, b4):
         
     last_rx = time.time()
     
-    # הוסרה מחיקת השורה
     print(f"[RX] R: {rollBits:02b} | P: {pitchBits:02b} | F: {f_2b} | Cmd: {req} | Close: {too_close} | Ign: {ign}")
 
 def run_hand_ssh_control():
@@ -206,7 +204,7 @@ def run_hand_ssh_control():
             idx = int(c) - 1
             fingers[idx] = (fingers[idx] + 1) % 4
             piano_player.set_states(fingers)
-            print(f"Fingers state updated: {fingers}") # הדפסה נקייה
+            print(f"Fingers state updated: {fingers}") 
         elif c == ' ' or c == 'k': chassis.stop_drive()
         elif c == 'q': break
 
@@ -231,7 +229,6 @@ if __name__ == "__main__":
                     else:
                         print(f"[SERIAL] Starting Serial Receiver on {SERIAL_PORT}...")
                         ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=0.1)
-                        # הסרנו את פקודות ה-DTR שהורגות את החיבור של ה-Uno R4
                         time.sleep(1)
                         ser.reset_input_buffer()
                         last_rx = time.time()
@@ -252,10 +249,14 @@ if __name__ == "__main__":
                                                 handle_payload(*[int(x) for x in parts])
                                         except Exception: pass
                                     else:
-                                        # הדפסה של הודעות אחרות המגיעות מהארדואינו (למשל הודעת "מוכן")
                                         print(f"[ARDUINO MSG] {line}")
                                         
-                            if time.time() - last_rx > 0.7: chassis.stop_drive()
+                            # Safety Timeout Mechanism - Zeroing all payload parameters if connection lost
+                            if time.time() - last_rx > 0.7: 
+                                chassis.stop_drive()
+                                print("[WARNING] Connection Lost. Forcing ZERO payload.")
+                                handle_payload(0, 0, 0, 0) # Sending zero data
+                                time.sleep(0.5) # Prevents spamming the console
                             time.sleep(0.01)
                             
                 except KeyboardInterrupt: print("\n[INFO] Returning to main menu...")
@@ -275,7 +276,6 @@ if __name__ == "__main__":
                     else: 
                         print(f"[SERIAL] Starting Serial Receiver on {SERIAL_PORT}...")
                         ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=0.1)
-                        # הסרנו את פקודות ה-DTR שהורגות את החיבור של ה-Uno R4
                         time.sleep(1)
                         ser.reset_input_buffer()
                         last_rx = time.time()
@@ -293,10 +293,14 @@ if __name__ == "__main__":
                                                 handle_hand_payload(*[int(x) for x in parts])
                                         except Exception: pass
                                     else:
-                                        # הדפסה של כל מה שהארדואינו כותב שאינו DATA: 
                                         print(f"[ARDUINO MSG] {line}")
                                         
-                            if time.time() - last_rx > 0.7: chassis.stop_drive()
+                            # Safety Timeout Mechanism - Zeroing all payload parameters if connection lost
+                            if time.time() - last_rx > 0.7: 
+                                chassis.stop_drive()
+                                print("[WARNING] Connection Lost. Forcing ZERO payload.")
+                                handle_hand_payload(0, 0, 0, 0) # Sending zero data
+                                time.sleep(0.5) # Prevents spamming the console
                             time.sleep(0.01)
 
                 except KeyboardInterrupt: print("\n[INFO] Returning to main menu...")
