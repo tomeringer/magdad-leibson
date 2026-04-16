@@ -20,8 +20,6 @@ BAUD_RATE = 115200
 
 ARC_STOP_OFFSET_CM, Z0_STOP_DISTANCE_CM = 4.5, 21.0
 ARC_MAX_OUTER_SPEED, ARC_SPEED_DIFF_FACTOR = 0.3, 1.06
-LEFT_CAM_PATH = "/dev/v4l/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.4:1.0-video-index0"
-RIGHT_CAM_PATH = "/dev/v4l/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.1:1.0-video-index0"
 
 factory = PiGPIOFactory()
 pi_enc = pigpio.pi()
@@ -67,15 +65,21 @@ def bring_bottle_xz():
             return
         time.sleep(0.1)
 
-def handle_payload(b1, b2, b3, b4):
+def handle_payload(merged_byte, flex_low):
     global _drive_hist, _ignore_ultra, last_rx, _arm_dir, _prev_f
 
-    rollBits = (b2 >> 2) & 0x03
-    pitchBits = (b2 >> 4) & 0x03
+    # Decode Compact Payload
+    rollBits = (merged_byte >> 2) & 0x03
+    pitchBits = merged_byte & 0x03
 
-    flex_data = (b2 << 8) | b1
-    f_2b = [(flex_data >> (i * 2)) & 0x03 for i in range(5)]
-    f = [0 if (val <= 1) else 1 for val in f_2b] 
+    f4 = (merged_byte >> 4) & 0x03
+    f0 = flex_low & 0x03
+    f1 = (flex_low >> 2) & 0x03
+    f2 = (flex_low >> 4) & 0x03
+    f3 = (flex_low >> 6) & 0x03
+
+    f_2b = [f0, f1, f2, f3, f4]
+    f = [1 if val == 3 else 0 for val in f_2b]
 
     if all(f) and not all(_prev_f):
         chassis.stop_drive()
@@ -84,13 +88,13 @@ def handle_payload(b1, b2, b3, b4):
     else:
         if f[4] and not _prev_f[4]: gripper.move_step(1)
         if f[0] and not _prev_f[0]: gripper.move_step(0)
-        _arm_dir = -1 if (f[2] and not f[1]) else 1 if (f[1] and not f[2]) else 0
+        _arm_dir = 1 if (f[2] and not f[1]) else -1 if (f[1] and not f[2]) else 0
         if _arm_dir != 0:
             gripper.move_step(_arm_dir > 1)
 
     req = "STOP"
-    if pitchBits == 0b01:     req = "FWD"
-    elif pitchBits == 0b10:   req = "REV"
+    if pitchBits == 0b10:     req = "FWD"
+    elif pitchBits == 0b01:   req = "REV"
     elif rollBits == 0b01:    req = "RIGHT"
     elif rollBits == 0b10:    req = "LEFT"
 
@@ -116,7 +120,7 @@ def handle_payload(b1, b2, b3, b4):
     last_rx = time.time()
     _prev_f = f
 
-    print(f"\r[RX] R: {rollBits:02b} | P: {pitchBits:02b} | F: {f_2b} | Cmd: {req} | Close: {too_close} | Ign: {ign}      ", end="")
+    print(f"[RX] R: {rollBits:02b} | P: {pitchBits:02b} | F: {f_2b} | Cmd: {req} | Close: {too_close} | Ign: {ign}")
 
 def run_ssh_control():
     def getch():
@@ -145,44 +149,58 @@ def run_ssh_control():
 # ========================================================
 # HAND MODE
 # ========================================================
-def handle_hand_payload(b1, b2, b3, b4):
+def handle_hand_payload(merged_byte, flex_low):
     global _drive_hist, _ignore_ultra, last_rx
     
-    rollBits = (b2 >> 2) & 0x03
-    pitchBits = (b2 >> 4) & 0x03
+    rollBits = (merged_byte >> 2) & 0x03
+    pitchBits = merged_byte & 0x03
     
-    flex_data = (b2 << 8) | b1
-    f_2b = [(flex_data >> (i * 2)) & 0x03 for i in range(5)]
+    f4 = (merged_byte >> 4) & 0x03
+    f0 = flex_low & 0x03
+    f1 = (flex_low >> 2) & 0x03
+    f2 = (flex_low >> 4) & 0x03
+    f3 = (flex_low >> 6) & 0x03
 
-    piano_player.set_states(f_2b)
+    mode_bit = (merged_byte >> 6) & 0x01
+    f_2b = [f0, f1, f2, f3, f4]
 
-    req = "STOP"
-    if pitchBits == 0b01:     req = "FWD"
-    elif pitchBits == 0b10:   req = "REV"
-    elif rollBits == 0b01:    req = "RIGHT"
-    elif rollBits == 0b10:    req = "LEFT"
-        
-    too_close = chassis.obstacle_too_close()
-    
-    if _ignore_ultra[0] and (req in ("STOP", "REV") or req != _ignore_ultra[1]): 
-        _ignore_ultra[0] = False
-        
-    if (not _ignore_ultra[0]) and req in {"FWD", "LEFT", "RIGHT"}:
-        if _drive_hist[1] == "STOP" and _drive_hist[0] == req: 
-            _ignore_ultra[:] = [True, req]
+    if mode_bit == 1:
+        piano_player.set_states(f_2b)
+        print(f"[PIANO] R: {rollBits:02b} | P: {pitchBits:02b} | F: {f_2b}")
+    else:
+        piano_player.set_states([0, 0, 0, 0, 0])
+        if f1 > 2: arm.run(False)
+        elif f2 > 2: arm.run(True)
+        else: arm.stop()
 
-    ign = (_ignore_ultra[0] and req == _ignore_ultra[1])
-    
-    if req == "REV": chassis.drive_reverse()
-    elif req == "FWD": chassis.drive_forward() if (not too_close or ign) else chassis.stop_drive()
-    elif req == "LEFT": chassis.turn_left() if (not too_close or ign) else chassis.stop_drive()
-    elif req == "RIGHT": chassis.turn_right() if (not too_close or ign) else chassis.stop_drive()
-    else: chassis.stop_drive()
+        req = "STOP"
+        if pitchBits == 0b10:     req = "FWD"
+        elif pitchBits == 0b01:   req = "REV"
+        elif rollBits == 0b01:    req = "RIGHT"
+        elif rollBits == 0b10:    req = "LEFT"
+            
+        too_close = chassis.obstacle_too_close()
         
-    if req != _drive_hist[1]: _drive_hist = [_drive_hist[1], req]
+        if _ignore_ultra[0] and (req in ("STOP", "REV") or req != _ignore_ultra[1]): 
+            _ignore_ultra[0] = False
+            
+        if (not _ignore_ultra[0]) and req in {"FWD", "LEFT", "RIGHT"}:
+            if _drive_hist[1] == "STOP" and _drive_hist[0] == req: 
+                _ignore_ultra[:] = [True, req]
+
+        ign = (_ignore_ultra[0] and req == _ignore_ultra[1])
         
+        if req == "REV": chassis.drive_reverse()
+        elif req == "FWD": chassis.drive_forward() if (not too_close or ign) else chassis.stop_drive()
+        elif req == "LEFT": chassis.turn_left() if (not too_close or ign) else chassis.stop_drive()
+        elif req == "RIGHT": chassis.turn_right() if (not too_close or ign) else chassis.stop_drive()
+        else: chassis.stop_drive()
+            
+        if req != _drive_hist[1]: _drive_hist = [_drive_hist[1], req]
+            
+        print(f"[RX] R: {rollBits:02b} | P: {pitchBits:02b} | F: {f_2b} | Cmd: {req} | Close: {too_close} | Ign: {ign}")
+
     last_rx = time.time()
-    print(f"\r[RX] R: {rollBits:02b} | P: {pitchBits:02b} | F: {f_2b} | Cmd: {req} | Close: {too_close} | Ign: {ign}      ", end="")
 
 def run_hand_ssh_control():
     def getch():
@@ -203,9 +221,9 @@ def run_hand_ssh_control():
         elif c == 'd': chassis.turn_right()
         elif c in ['1', '2', '3', '4', '5']:
             idx = int(c) - 1
-            fingers[idx] = (fingers[idx] + 1) % 4
+            fingers[idx] = 3 if fingers[idx] == 0 else 0
             piano_player.set_states(fingers)
-            print(f"\rFingers state updated: {fingers}        ", end="")
+            print(f"Fingers state updated: {fingers}") 
         elif c == ' ' or c == 'k': chassis.stop_drive()
         elif c == 'q': break
 
@@ -229,8 +247,9 @@ if __name__ == "__main__":
                         run_ssh_control()
                     else:
                         print(f"[SERIAL] Starting Serial Receiver on {SERIAL_PORT}...")
-                        ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=0.05)
-                        ser.dtr = False; time.sleep(1); ser.reset_input_buffer(); ser.dtr = True
+                        ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=0.1)
+                        time.sleep(1)
+                        ser.reset_input_buffer()
                         last_rx = time.time()
                         
                         while True:
@@ -239,16 +258,24 @@ if __name__ == "__main__":
                             if _arm_dir != 0: arm.run(_arm_dir == 1)
                             else: arm.stop()
                                 
-                            while ser.in_waiting > 0:
+                            if ser.in_waiting > 0:
                                 line = ser.readline().decode('utf-8', errors='ignore').strip()
-                                if line.startswith("DATA:"):
-                                    try:
-                                        parts = line.split(":")[1].split(",")
-                                        if len(parts) == 4:
-                                            handle_payload(*[int(x) for x in parts])
-                                    except Exception: pass
+                                if line:
+                                    if line.startswith("DATA:"):
+                                        try:
+                                            parts = line.split(":")[1].split(",")
+                                            if len(parts) == 2:
+                                                handle_payload(int(parts[0]), int(parts[1]))
+                                        except Exception: pass
+                                    else:
+                                        print(f"[ARDUINO MSG] {line}")
                                         
-                            if time.time() - last_rx > 0.7: chassis.stop_drive()
+                            # חסכון בסוללה ומניעת השתוללות במקרה ניתוק
+                            if time.time() - last_rx > 0.7: 
+                                chassis.stop_drive()
+                                print("[WARNING] Connection Lost. Halting...")
+                                handle_payload(0, 0) 
+                                time.sleep(0.5) 
                             time.sleep(0.01)
                             
                 except KeyboardInterrupt: print("\n[INFO] Returning to main menu...")
@@ -261,35 +288,45 @@ if __name__ == "__main__":
             elif mode == "h":
                 try:
                     chassis.init(factory, pi_enc)
+                    arm.init(factory)
                     piano_player.init(factory)
 
                     if input("Use Keyboard? (y/n)\n").lower() == "y":
                         run_hand_ssh_control()
                     else: 
                         print(f"[SERIAL] Starting Serial Receiver on {SERIAL_PORT}...")
-                        ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=0.05)
-                        ser.dtr = False; time.sleep(1); ser.reset_input_buffer(); ser.dtr = True
+                        ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=0.1)
+                        time.sleep(1)
+                        ser.reset_input_buffer()
                         last_rx = time.time()
                         
                         while True:
                             chassis.ultrasonic_tick()
                             
-                            while ser.in_waiting > 0:
+                            if ser.in_waiting > 0:
                                 line = ser.readline().decode('utf-8', errors='ignore').strip()
-                                if line.startswith("DATA:"):
-                                    try:
-                                        parts = line.split(":")[1].split(",")
-                                        if len(parts) == 4:
-                                            handle_hand_payload(*[int(x) for x in parts])
-                                    except Exception: pass
+                                if line:
+                                    if line.startswith("DATA:"):
+                                        try:
+                                            parts = line.split(":")[1].split(",")
+                                            if len(parts) == 2:
+                                                handle_hand_payload(int(parts[0]), int(parts[1]))
+                                        except Exception: pass
+                                    else:
+                                        print(f"[ARDUINO MSG] {line}")
                                         
-                            if time.time() - last_rx > 0.7: chassis.stop_drive()
+                            if time.time() - last_rx > 0.7: 
+                                chassis.stop_drive()
+                                print("[WARNING] Connection Lost. Halting...")
+                                handle_hand_payload(0, 0) 
+                                time.sleep(0.5) 
                             time.sleep(0.01)
 
                 except KeyboardInterrupt: print("\n[INFO] Returning to main menu...")
                 except Exception as e: print(f"[ERROR] HAND mode: {e}")
                 finally:
                     chassis.stop_drive(); chassis.close_pins(); piano_player.close_pins()
+                    arm.close_pins()
                     if 'ser' in locals() and ser.is_open: ser.close()
                     
             else: print("Invalid input.")
