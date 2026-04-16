@@ -32,6 +32,7 @@ GPIO.setmode(GPIO.BCM)
 
 _arm_dir = 0
 _prev_f = [0, 0, 0, 0, 0]
+_binary_f = [0, 0, 0, 0, 0]  # NEW: Tracks the latched binary states of the fingers
 _drive_hist = ["STOP", "STOP"]
 _ignore_ultra = [False, None]
 last_rx = 0.0
@@ -71,16 +72,24 @@ def bring_bottle_xz():
         time.sleep(0.1)
 
 def handle_payload(merged_byte, flex_low, b3=0, b4=0):
-    global _drive_hist, _ignore_ultra, last_rx, _arm_dir, _prev_f
+    global _drive_hist, _ignore_ultra, last_rx, _arm_dir, _prev_f, _binary_f
 
     rollBits = (merged_byte >> 2) & 0x03
     pitchBits = merged_byte & 0x03
     modeBit = (merged_byte >> 6) & 0x01
 
+    # Extract raw 0-3 states
     f_2b = [(flex_low >> (i * 2)) & 0x03 for i in range(4)]
     f_2b.append((merged_byte >> 4) & 0x03)
     
-    f = [0 if (val <= 1) else 1 for val in f_2b] 
+    # NEW: Software Hysteresis - Latch ON at 3, Latch OFF at 0
+    for i in range(5):
+        if _binary_f[i] == 0 and f_2b[i] == 3:
+            _binary_f[i] = 1
+        elif _binary_f[i] == 1 and f_2b[i] == 0:
+            _binary_f[i] = 0
+
+    f = list(_binary_f) # Use the locked binary states for logic
 
     if all(f) and not all(_prev_f):
         chassis.stop_drive()
@@ -121,7 +130,7 @@ def handle_payload(merged_byte, flex_low, b3=0, b4=0):
     last_rx = time.time()
     _prev_f = f
 
-    print(f"[RX] R: {rollBits:02b} | P: {pitchBits:02b} | F: {f_2b} | Cmd: {req} | Close: {too_close} | Ign: {ign}")
+    print(f"[RX] R: {rollBits:02b} | P: {pitchBits:02b} | F(Bin): {f} | Cmd: {req} | Close: {too_close} | Ign: {ign}")
 
 def run_ssh_control():
     def getch():
@@ -150,19 +159,27 @@ def run_ssh_control():
 # ========================================================
 # HAND MODE
 # ========================================================
-def handle_hand_payload(merged_byte, flex_low):
-    global _drive_hist, _ignore_ultra, last_rx, _arm_dir
+def handle_hand_payload(merged_byte, flex_low, *args):
+    global _drive_hist, _ignore_ultra, last_rx, _arm_dir, _binary_f
     
     rollBits = (merged_byte >> 2) & 0x03
     pitchBits = merged_byte & 0x03
     modeBit = (merged_byte >> 6) & 0x01
     
+    # Extract raw 0-3 states
     f_2b = [(flex_low >> (i * 2)) & 0x03 for i in range(4)]
     f_2b.append((merged_byte >> 4) & 0x03)
 
+    # NEW: Software Hysteresis - Latch ON at 3, Latch OFF at 0
+    for i in range(5):
+        if _binary_f[i] == 0 and f_2b[i] == 3:
+            _binary_f[i] = 1
+        elif _binary_f[i] == 1 and f_2b[i] == 0:
+            _binary_f[i] = 0
+
     if modeBit == 1:
         # --- MODE 1: HAND/SERVO CONTROL ---
-        # Update fingers, completely stop chassis and arm
+        # Update fingers using RAW 0-3 states for smooth servo sweeps
         piano_player.set_states(f_2b)
         
         chassis.stop_drive()
@@ -173,12 +190,11 @@ def handle_hand_payload(merged_byte, flex_low):
         
     else:
         # --- MODE 0: DRIVE & ARM CONTROL ---
-        # Ignore piano_player updates
         
-        # Arm Logic: F1 (Index) up, F2 (Middle) down
-        if f_2b[1] >= 2:
+        # Arm Logic: F1 up, F2 down, using the solid BINARY states
+        if _binary_f[1] == 1:
             _arm_dir = 1
-        elif f_2b[2] >= 2:
+        elif _binary_f[2] == 1:
             _arm_dir = -1
         else:
             _arm_dir = 0
@@ -211,7 +227,7 @@ def handle_hand_payload(merged_byte, flex_low):
             
     last_rx = time.time()
     
-    print(f"[RX] MODE: {modeBit} | R: {rollBits:02b} P: {pitchBits:02b} | F: {f_2b} | Cmd: {req} | Arm: {_arm_dir}")
+    print(f"[RX] MODE: {modeBit} | R: {rollBits:02b} P: {pitchBits:02b} | F(Raw): {f_2b} | Cmd: {req} | Arm: {_arm_dir}")
 
 def run_hand_ssh_control():
     def getch():
@@ -263,25 +279,37 @@ if __name__ == "__main__":
                         print(f"[WIFI] Starting UDP Receiver on port {UDP_PORT}...")
                         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
                         sock.bind((UDP_IP, UDP_PORT))
-                        sock.setblocking(False)
+                        sock.settimeout(0.01)
                         last_rx = time.time()
                         
                         while True:
                             chassis.ultrasonic_tick()
-                            
                             if _arm_dir != 0: arm.run(_arm_dir == 1)
                             else: arm.stop()
                                 
-                            ready = select.select([sock], [], [], 0.01)
-                            if ready[0]:
-                                data, addr = sock.recvfrom(1024)
-                                if len(data) >= 2:
-                                    handle_payload(data[0], data[1], 0, 0)
+                            packet_received = False
+                            latest_data = None
+                            
+                            while True:
+                                try:
+                                    data, addr = sock.recvfrom(1024)
+                                    latest_data = data
+                                    packet_received = True
+                                except socket.timeout:
+                                    break
+                                except BlockingIOError:
+                                    break
+                            
+                            if packet_received and latest_data:
+                                if len(latest_data) >= 4 and latest_data[0] == 0xAA and latest_data[3] == 0x55:
+                                    handle_payload(latest_data[1], latest_data[2])
+                                elif len(latest_data) >= 2:
+                                    handle_payload(latest_data[0], latest_data[1])
                                     
                             if time.time() - last_rx > 0.7: 
                                 chassis.stop_drive()
                                 print("[WARNING] Connection Lost. Forcing ZERO payload.")
-                                handle_payload(0, 0, 0, 0) 
+                                handle_payload(0, 0)
                                 time.sleep(0.5)
                                 
                     else:
@@ -293,18 +321,17 @@ if __name__ == "__main__":
                         
                         while True:
                             chassis.ultrasonic_tick()
-                            
                             if _arm_dir != 0: arm.run(_arm_dir == 1)
                             else: arm.stop()
                                 
-                            if ser.in_waiting > 0:
+                            while ser.in_waiting > 0:
                                 line = ser.readline().decode('utf-8', errors='ignore').strip()
                                 if line:
                                     if line.startswith("DATA:"):
                                         try:
                                             parts = line.split(":")[1].split(",")
-                                            if len(parts) == 4:
-                                                handle_payload(*[int(x) for x in parts])
+                                            if len(parts) >= 2:
+                                                handle_payload(int(parts[0]), int(parts[1]))
                                         except Exception: pass
                                     else:
                                         print(f"[ARDUINO MSG] {line}")
@@ -312,7 +339,7 @@ if __name__ == "__main__":
                             if time.time() - last_rx > 0.7: 
                                 chassis.stop_drive()
                                 print("[WARNING] Connection Lost. Forcing ZERO payload.")
-                                handle_payload(0, 0, 0, 0) 
+                                handle_payload(0, 0) 
                                 time.sleep(0.5) 
                             time.sleep(0.01)
                             
@@ -328,7 +355,7 @@ if __name__ == "__main__":
                 try:
                     chassis.init(factory, pi_enc)
                     piano_player.init(factory)
-                    arm.init(factory) # <-- Added so the arm works in Mode 0
+                    arm.init(factory)
 
                     ctrl_mode = input("Select control: Keyboard (k), Arduino (a), or WiFi (w)?\n").strip().lower()
 
@@ -339,26 +366,38 @@ if __name__ == "__main__":
                         print(f"[WIFI] Starting UDP Receiver on port {UDP_PORT}...")
                         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
                         sock.bind((UDP_IP, UDP_PORT))
-                        sock.setblocking(False)
+                        sock.settimeout(0.01)
                         last_rx = time.time()
                         
                         while True:
                             chassis.ultrasonic_tick()
                             
-                            # <-- Added Arm execute logic here
                             if _arm_dir != 0: arm.run(_arm_dir == 1)
                             else: arm.stop()
-                                
-                            ready = select.select([sock], [], [], 0.01)
-                            if ready[0]:
-                                data, addr = sock.recvfrom(1024)
-                                if len(data) >= 2:
-                                    handle_hand_payload(data[0], data[1])
+                            
+                            packet_received = False
+                            latest_data = None
+                            
+                            while True:
+                                try:
+                                    data, addr = sock.recvfrom(1024)
+                                    latest_data = data
+                                    packet_received = True
+                                except socket.timeout:
+                                    break
+                                except BlockingIOError:
+                                    break
+                                    
+                            if packet_received and latest_data:
+                                if len(latest_data) >= 4 and latest_data[0] == 0xAA and latest_data[3] == 0x55:
+                                    handle_hand_payload(latest_data[1], latest_data[2])
+                                elif len(latest_data) >= 2:
+                                    handle_hand_payload(latest_data[0], latest_data[1])
                                     
                             if time.time() - last_rx > 0.7: 
                                 chassis.stop_drive()
                                 _arm_dir = 0
-                                piano_player.set_states([0,0,0,0,0]) # Reset fingers on timeout
+                                piano_player.set_states([0,0,0,0,0])
                                 print("[WARNING] Connection Lost. Forcing ZERO payload.")
                                 handle_hand_payload(0, 0) 
                                 time.sleep(0.5) 
@@ -373,18 +412,17 @@ if __name__ == "__main__":
                         while True:
                             chassis.ultrasonic_tick()
                             
-                            # <-- Added Arm execute logic here
                             if _arm_dir != 0: arm.run(_arm_dir == 1)
                             else: arm.stop()
                             
-                            if ser.in_waiting > 0:
+                            while ser.in_waiting > 0:
                                 line = ser.readline().decode('utf-8', errors='ignore').strip()
                                 if line:
                                     if line.startswith("DATA:"):
                                         try:
                                             parts = line.split(":")[1].split(",")
-                                            if len(parts) == 2:
-                                                handle_hand_payload(*[int(x) for x in parts])
+                                            if len(parts) >= 2:
+                                                handle_hand_payload(int(parts[0]), int(parts[1]))
                                         except Exception: pass
                                     else:
                                         print(f"[ARDUINO MSG] {line}")
@@ -392,7 +430,7 @@ if __name__ == "__main__":
                             if time.time() - last_rx > 0.7: 
                                 chassis.stop_drive()
                                 _arm_dir = 0
-                                piano_player.set_states([0,0,0,0,0]) # Reset fingers on timeout
+                                piano_player.set_states([0,0,0,0,0]) 
                                 print("[WARNING] Connection Lost. Forcing ZERO payload.")
                                 handle_hand_payload(0, 0) 
                                 time.sleep(0.5) 
@@ -402,7 +440,7 @@ if __name__ == "__main__":
                 except Exception as e: print(f"[ERROR] HAND mode: {e}")
                 finally:
                     chassis.stop_drive(); chassis.close_pins(); piano_player.close_pins()
-                    arm.close_pins() # <-- Clean up the arm pins!
+                    arm.close_pins() 
                     if 'ser' in locals() and hasattr(ser, 'is_open') and ser.is_open: ser.close()
                     if 'sock' in locals(): sock.close()
                     
