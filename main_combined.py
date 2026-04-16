@@ -282,7 +282,7 @@ def run_hand_ssh_control():
         elif c in ['1', '2', '3', '4', '5']:
             idx = int(c) - 1
             # Cycle the specific finger state: 0 -> 1 -> 2 -> 3 -> 0
-            fingers[idx] = (fingers[idx] + 1) % 4
+            fingers[idx] = 3 if fingers[idx] == 0 else 0
             piano_player.set_states(fingers)
             print(f"\rFingers state updated: {fingers}        ", end="")
         elif c == ' ' or c == 'k':
