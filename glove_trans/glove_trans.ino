@@ -1,28 +1,12 @@
 #include <Wire.h>
 #include <ICM_20948.h>
-#include "driver/rmt.h" // הוספת ספריית השידור במקום WiFi
+#include "driver/rmt.h"
 
 // ========================================================
 //          RF TRANSMITTER SETUP
 // ========================================================
 #define TX_PIN 5 
-#define HALF_BIT 500 // התקשורת היציבה שבנינו
-
-// ========================================================
-//          BYTE → BINARY PRINT (For Debugging)
-// ========================================================
-#define BYTE_TO_BINARY_PATTERN "%c%c%c%c%c%c%c%c"
-#define BYTE_TO_BINARY(byte)  \
-  ((byte) & 0x80 ? '1' : '0'), \
-  ((byte) & 0x40 ? '1' : '0'), \
-  ((byte) & 0x20 ? '1' : '0'), \
-  ((byte) & 0x10 ? '1' : '0'), \
-  ((byte) & 0x08 ? '1' : '0'), \
-  ((byte) & 0x04 ? '1' : '0'), \
-  ((byte) & 0x02 ? '1' : '0'), \
-  ((byte) & 0x01 ? '1' : '0')
-
-bool lastPacketWasZero = false;
+#define HALF_BIT 500 // תזמון יציב מוכח לאוויר
 
 // ========================================================
 //                  IMU SETUP
@@ -33,17 +17,14 @@ ICM_20948_I2C imu;
 constexpr float ACC_MG_TO_G = 0.001f;
 constexpr float ALPHA_RP  = 0.98f;
 constexpr float ALPHA_YAW = 0.98f;
-constexpr float MAX_DT = 0.2f; //originally 0.1f
+constexpr float MAX_DT = 0.1f;
 
 constexpr float ROLL_TH  = 45.0f;
 constexpr float PITCH_TH = 30.0f;
 
-// Gyro bias
 constexpr float GYRO_BIAS_DPS_X = -0.8248f;
 constexpr float GYRO_BIAS_DPS_Y =  0.1288f;
 constexpr float GYRO_BIAS_DPS_Z = -0.5285f;
-
-// Magnetometer calibration
 constexpr float MAG_OFF_X = 0.0f;
 constexpr float MAG_OFF_Y = -46.7f;
 constexpr float MAG_OFF_Z = -25.2f;
@@ -61,17 +42,20 @@ unsigned long lastTime = 0;
 unsigned long lastPrintTime = 0;
 constexpr unsigned long SEND_PERIOD_MS = 100;
 
+bool lastPacketWasZero = false;
+
 // ========================================================
-//         FLEX SENSORS & STATISTICAL THRESHOLDS
+//         FLEX SENSORS & HYSTERESIS
 // ========================================================
 constexpr int NUM_FLEX = 5; 
-// REORDERED PINS: f0(A3), f1(A0), f2(A2), f3(A7), f4(A1)
+// === סידור האצבעות המבוקש ===
 int flexPins[NUM_FLEX] = {A3, A0, A2, A7, A1}; 
+
 float R_FIXED[NUM_FLEX]  = {47000.0f, 47000.0f, 47000.0f, 47000.0f, 47000.0f};
 constexpr float V_IN = 3.3f;
 float flexR[NUM_FLEX];
 
-// Statistically calculated Thresholds מהקוד הראשון
+// הותאם לסדר החדש של הפינים
 float THRESHOLDS[NUM_FLEX][3] = {
   {26485.3f, 32603.6f, 40369.7f}, // f0 (A3)       
   {37688.6f, 53299.8f, 77914.6f}, // f1 (A0)       
@@ -88,16 +72,12 @@ float HYSTERESIS[NUM_FLEX][3] = {
   {4388.2f, 4579.6f, 7535.8f}  // f4 (A1)
 };
 
-// Memory array for the state machine
 int currentStates[NUM_FLEX] = {0, 0, 0, 0, 0};
 
-// ========================================================
-//                  MODE TOGGLE GESTURE SETUP
-// ========================================================
 unsigned long gestureStartTime = 0;
 bool gestureActive = false;
 bool gestureProcessed = false;
-uint8_t modeBit = 0; // The new bit to tell the robot how to parse data
+uint8_t modeBit = 0; 
 
 // ========================================================
 //                      HELPERS
@@ -143,14 +123,11 @@ void updateOrientation(float dt, Vec3 &acc, Vec3 &gyr, Vec3 &mag) {
 
 uint16_t readFlexBits() { 
   uint16_t flexData = 0;
-  
   for (int i = 0; i < NUM_FLEX; i++) {
     long sum = 0;
     for (int k = 0; k < 5; k++) sum += analogRead(flexPins[i]);
-    
     float v = (sum / 5.0f) * (V_IN / 4095.0f);
     float r = 0.0f;
-    
     if (v > 0.01f) {
       if (v >= V_IN - 0.01f) r = 1000000.0f; 
       else r = R_FIXED[i] * (v / (V_IN - v));
@@ -158,10 +135,7 @@ uint16_t readFlexBits() {
     flexR[i] = r;
 
     int s = currentStates[i];
-
-    // Look UP a state
     while (s < 3 && r > (THRESHOLDS[i][s] + HYSTERESIS[i][s])) s++;
-    // Look DOWN a state
     while (s > 0 && r < (THRESHOLDS[i][s - 1] - HYSTERESIS[i][s - 1])) s--;
     
     currentStates[i] = s;
@@ -177,53 +151,38 @@ uint8_t encodeAxis(float angle, float th) {
 }
 
 // ========================================================
-//       DEBUG PRINT FUNCTION (מהקוד השני)
+//            RF TRANSMIT FUNCTION (Compact 3-Byte)
 // ========================================================
-void printPacketDebug(uint8_t b1, uint8_t b2, uint8_t b3, uint8_t b4, uint8_t chk) {
-  Serial.print("Sending RF Packet -> ");
-  Serial.print("B1: "); Serial.print(b1); Serial.print(" (");
-  for (int i=7; i>=0; i--) Serial.print((b1 >> i) & 1);
-  Serial.print(") | B2: "); Serial.print(b2); Serial.print(" (");
-  for (int i=7; i>=0; i--) Serial.print((b2 >> i) & 1);
-  Serial.print(") | B3: "); Serial.print(b3); Serial.print(" (");
-  for (int i=7; i>=0; i--) Serial.print((b3 >> i) & 1);
-  Serial.print(") | B4: "); Serial.print(b4); Serial.print(" (");
-  for (int i=7; i>=0; i--) Serial.print((b4 >> i) & 1);
-  Serial.print(") | CHK: "); Serial.println(chk);
-}
-
-// ========================================================
-//            RF TRANSMIT FUNCTION (ARRAY MODE)
-// ========================================================
-void transmitSecureArray(uint8_t d1, uint8_t d2, uint8_t d3, uint8_t d4) {
-  rmt_item32_t items[120]; 
+void transmitCompactData(uint8_t mergedByte, uint8_t flexLow) {
+  rmt_item32_t items[80]; 
   int idx = 0;
 
-  uint8_t packet[5] = {d1, d2, d3, d4, 0};
-  packet[4] = (d1 + d2 + d3 + d4) & 0xFF; // Checksum
-  
-  // הדפסת הדיבאג לאוויר לפני השידור
-  // printPacketDebug(packet[0], packet[1], packet[2], packet[3], packet[4]);
+  // 1. חימום (Preamble)
+  for(int i = 0; i < 6; i++) {
+    items[idx++] = {{{ 400, 1, 400, 0 }}}; 
+  }
 
-  // חימום וסנכרון
-  for(int i = 0; i < 6; i++) items[idx++] = {{{ 400, 1, 400, 0 }}}; 
-  items[idx++] = {{{ 1000, 1, 1000, 0 }}}; // Sync
-  items[idx++] = {{{ HALF_BIT, 1, HALF_BIT, 0 }}}; // Start bit (1)
+  // 2. סנכרון
+  items[idx++] = {{{ 1000, 1, 1000, 0 }}};
 
-  // שידור 40 ביטים (5 בתים שלמים)
-  for (int b = 0; b < 5; b++) {
-    for (int i = 7; i >= 0; i--) {
-      if ((packet[b] >> i) & 1) items[idx++] = {{{ HALF_BIT, 1, HALF_BIT, 0 }}}; 
-      else items[idx++] = {{{ HALF_BIT, 0, HALF_BIT, 1 }}}; 
-    }
+  // 3. ביט התחלה
+  items[idx++] = {{{ HALF_BIT, 1, HALF_BIT, 0 }}};
+
+  // 4. בניית המטען (24 ביטים)
+  uint8_t checksum = (mergedByte + flexLow) & 0xFF;
+  uint32_t payload = ((uint32_t)mergedByte << 16) | ((uint32_t)flexLow << 8) | checksum;
+
+  for (int i = 23; i >= 0; i--) {
+    if ((payload >> i) & 1) items[idx++] = {{{ HALF_BIT, 1, HALF_BIT, 0 }}}; 
+    else items[idx++] = {{{ HALF_BIT, 0, HALF_BIT, 1 }}}; 
   }
   
-  items[idx++] = {{{ 0, 0, 0, 0 }}}; // סיום
+  items[idx++] = {{{ 0, 0, 0, 0 }}};
 
   // שידור משולש לאמינות
   for(int r = 0; r < 3; r++) {
     rmt_write_items(RMT_CHANNEL_0, items, idx, true);
-    delay(10); 
+    delay(12); 
   }
 }
 
@@ -232,10 +191,8 @@ void transmitSecureArray(uint8_t d1, uint8_t d2, uint8_t d3, uint8_t d4) {
 // ========================================================
 void setup() {
   Serial.begin(115200);
-  
-  // חסימה למניעת קריסת ה-USB 
-  // while (!Serial) { delay(10); } 
-  Serial.println("Glove System - Exact Logic with RF 433MHz Transmission");
+  while (!Serial) { delay(10); } 
+  Serial.println("Glove System - Fast Compact RF Mode (Drive Commands Only)");
 
   Wire.begin();
   Wire.setClock(400000);
@@ -253,7 +210,6 @@ void setup() {
   ori.yaw = magYaw(mag, ori.roll, ori.pitch);
   ref = ori;
 
-  // --- הגדרת חומרת הרדיו במקום ה-WIFI ---
   rmt_config_t config;
   config.rmt_mode = RMT_MODE_TX;
   config.channel = RMT_CHANNEL_0;
@@ -290,12 +246,12 @@ void loop() {
     float relPitch = wrapAngle(ori.pitch - ref.pitch);
 
     uint16_t flexData = readFlexBits();
-    uint8_t rollBits = encodeAxis(relRoll,  ROLL_TH);
-    uint8_t pitchBits = encodeAxis(relPitch, PITCH_TH);
+    
+    // === היפוך כיווני הנסיעה (כפי שביקשת) ===
+    uint8_t rollBits = encodeAxis(-relRoll,  ROLL_TH);
+    uint8_t pitchBits = encodeAxis(-relPitch, PITCH_TH);
     uint8_t imuByte = (rollBits << 2) | pitchBits;
 
-    // --- GESTURE DETECTION FOR MODE BIT ---
-    // User applied all fingers (state 3) except f1 and f2 (state 0)
     bool isGesture = (currentStates[0] >= 1 && currentStates[3] >= 1 && currentStates[4] >= 1 && 
                       currentStates[1] == 0 && currentStates[2] == 0);
 
@@ -305,8 +261,8 @@ void loop() {
         gestureStartTime = nowMs;
         gestureProcessed = false;
       } else if (!gestureProcessed && (nowMs - gestureStartTime >= 2000)) {
-        modeBit = (modeBit == 0) ? 1 : 0; // Toggle the bit
-        gestureProcessed = true; // Prevent rapid toggling
+        modeBit = (modeBit == 0) ? 1 : 0; 
+        gestureProcessed = true; 
         Serial.print("\n>>> MODE BIT TOGGLED TO: ");
         Serial.println(modeBit);
       }
@@ -315,29 +271,21 @@ void loop() {
       gestureProcessed = false;
     }
 
-    // Split the 16-bit flex data
-    uint8_t flexHigh = (flexData >> 8) & 0x03; // Top 2 bits (Finger 4)
-    uint8_t flexLow  = flexData & 0xFF;        // Bottom 8 bits (Fingers 0-3)
+    uint8_t flexHigh = (flexData >> 8) & 0x03; 
+    uint8_t flexLow  = flexData & 0xFF;        
 
-    // Merge modeBit (bit 6), flexHigh (bits 4-5), and imuByte (bits 0-3)
     uint8_t mergedByte = (modeBit << 6) | (flexHigh << 4) | imuByte;
 
-    // Output strictly for Serial Debugging
-    Serial.print("IMU: R="); Serial.print(relRoll, 1);
-    Serial.print(" P="); Serial.print(relPitch, 1);
-    Serial.print(" | Mode: "); Serial.print(modeBit);
-    Serial.print(" | Merged: "); Serial.printf(BYTE_TO_BINARY_PATTERN, BYTE_TO_BINARY(mergedByte));
-    Serial.print(" | Low: "); Serial.printf(BYTE_TO_BINARY_PATTERN, BYTE_TO_BINARY(flexLow));
-    Serial.println();
-
-    // Mask out the modeBit when checking for a zero packet to save battery when the hand is flat
     bool isZeroPacket = ((mergedByte & 0x3F) == 0x00 && flexLow == 0x00);
 
-    // --- RF TRANSMISSION (מחליף את ה-UDP המקורי) ---
+    // חסכון בסוללה כשהיד שטוחה, פרט לפעם הראשונה
     if (!(isZeroPacket && lastPacketWasZero)) {
       
-      // משדרים את 2 הבתים החשובים של הקוד המקורי, כשהם ארוזים בפונקציית מערך ה-RF
-      transmitSecureArray(mergedByte, flexLow, 0, 0);
+      // שידור אלחוטי קומפקטי
+      transmitCompactData(mergedByte, flexLow);
+      
+      Serial.print("[TX] Merged: "); Serial.print(mergedByte);
+      Serial.print(" | Low: "); Serial.println(flexLow);
       
       lastPacketWasZero = isZeroPacket;
     }
