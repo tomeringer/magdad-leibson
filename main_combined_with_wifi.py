@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import os, time, math, sys, tty, termios, pigpio
 import serial
+import socket
+import select
 import RPi.GPIO as GPIO
 from gpiozero.pins.pigpio import PiGPIOFactory
 
@@ -17,6 +19,9 @@ os.environ['PIGPIO_ADDR'] = 'localhost'
 # ========================================================
 SERIAL_PORT = '/dev/ttyACM0'  
 BAUD_RATE = 115200
+
+UDP_IP = "0.0.0.0"
+UDP_PORT = 4210
 
 ARC_STOP_OFFSET_CM, Z0_STOP_DISTANCE_CM = 4.5, 21.0
 ARC_MAX_OUTER_SPEED, ARC_SPEED_DIFF_FACTOR = 0.3, 1.06
@@ -224,8 +229,38 @@ if __name__ == "__main__":
                     arm.init(factory)
                     vision.init()
                     
-                    if input("Use Keyboard? (y/n)\n").lower() == "y":
+                    ctrl_mode = input("Select control: Keyboard (k), Arduino (a), or WiFi (w)?\n").strip().lower()
+                    
+                    if ctrl_mode == "k":
                         run_ssh_control()
+                        
+                    elif ctrl_mode == "w":
+                        print(f"[WIFI] Starting UDP Receiver on port {UDP_PORT}...")
+                        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                        sock.bind((UDP_IP, UDP_PORT))
+                        sock.setblocking(False)
+                        last_rx = time.time()
+                        
+                        while True:
+                            chassis.ultrasonic_tick()
+                            
+                            if _arm_dir != 0: arm.run(_arm_dir == 1)
+                            else: arm.stop()
+                                
+                            ready = select.select([sock], [], [], 0.01)
+                            if ready[0]:
+                                data, addr = sock.recvfrom(1024)
+                                if len(data) >= 2:
+                                    # Passing data[1] (flexLow) as b1, data[0] (mergedByte) as b2 to match Arduino format
+                                    handle_payload(data[1], data[0], 0, 0)
+                                    
+                            # Safety Timeout Mechanism
+                            if time.time() - last_rx > 0.7: 
+                                chassis.stop_drive()
+                                print("[WARNING] Connection Lost. Forcing ZERO payload.")
+                                handle_payload(0, 0, 0, 0) # Sending zero data
+                                time.sleep(0.5)
+                                
                     else:
                         print(f"[SERIAL] Starting Serial Receiver on {SERIAL_PORT}...")
                         ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=0.1)
@@ -251,12 +286,12 @@ if __name__ == "__main__":
                                     else:
                                         print(f"[ARDUINO MSG] {line}")
                                         
-                            # Safety Timeout Mechanism - Zeroing all payload parameters if connection lost
+                            # Safety Timeout Mechanism
                             if time.time() - last_rx > 0.7: 
                                 chassis.stop_drive()
                                 print("[WARNING] Connection Lost. Forcing ZERO payload.")
-                                handle_payload(0, 0, 0, 0) # Sending zero data
-                                time.sleep(0.5) # Prevents spamming the console
+                                handle_payload(0, 0, 0, 0) 
+                                time.sleep(0.5) 
                             time.sleep(0.01)
                             
                 except KeyboardInterrupt: print("\n[INFO] Returning to main menu...")
@@ -264,15 +299,43 @@ if __name__ == "__main__":
                 finally:
                     chassis.stop_drive(); chassis.close_pins(); gripper.close_pins()
                     arm.close_pins(); vision.shutdown()
-                    if 'ser' in locals() and ser.is_open: ser.close()
+                    if 'ser' in locals() and hasattr(ser, 'is_open') and ser.is_open: ser.close()
+                    if 'sock' in locals(): sock.close()
                         
             elif mode == "h":
                 try:
                     chassis.init(factory, pi_enc)
                     piano_player.init(factory)
 
-                    if input("Use Keyboard? (y/n)\n").lower() == "y":
+                    ctrl_mode = input("Select control: Keyboard (k), Arduino (a), or WiFi (w)?\n").strip().lower()
+
+                    if ctrl_mode == "k":
                         run_hand_ssh_control()
+                        
+                    elif ctrl_mode == "w":
+                        print(f"[WIFI] Starting UDP Receiver on port {UDP_PORT}...")
+                        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                        sock.bind((UDP_IP, UDP_PORT))
+                        sock.setblocking(False)
+                        last_rx = time.time()
+                        
+                        while True:
+                            chassis.ultrasonic_tick()
+                                
+                            ready = select.select([sock], [], [], 0.01)
+                            if ready[0]:
+                                data, addr = sock.recvfrom(1024)
+                                if len(data) >= 2:
+                                    # Passing data[1] (flexLow) as b1, data[0] (mergedByte) as b2 to match Arduino format
+                                    handle_hand_payload(data[1], data[0], 0, 0)
+                                    
+                            # Safety Timeout Mechanism
+                            if time.time() - last_rx > 0.7: 
+                                chassis.stop_drive()
+                                print("[WARNING] Connection Lost. Forcing ZERO payload.")
+                                handle_hand_payload(0, 0, 0, 0) 
+                                time.sleep(0.5) 
+                                
                     else: 
                         print(f"[SERIAL] Starting Serial Receiver on {SERIAL_PORT}...")
                         ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=0.1)
@@ -295,19 +358,20 @@ if __name__ == "__main__":
                                     else:
                                         print(f"[ARDUINO MSG] {line}")
                                         
-                            # Safety Timeout Mechanism - Zeroing all payload parameters if connection lost
+                            # Safety Timeout Mechanism
                             if time.time() - last_rx > 0.7: 
                                 chassis.stop_drive()
                                 print("[WARNING] Connection Lost. Forcing ZERO payload.")
-                                handle_hand_payload(0, 0, 0, 0) # Sending zero data
-                                time.sleep(0.5) # Prevents spamming the console
+                                handle_hand_payload(0, 0, 0, 0) 
+                                time.sleep(0.5) 
                             time.sleep(0.01)
 
                 except KeyboardInterrupt: print("\n[INFO] Returning to main menu...")
                 except Exception as e: print(f"[ERROR] HAND mode: {e}")
                 finally:
                     chassis.stop_drive(); chassis.close_pins(); piano_player.close_pins()
-                    if 'ser' in locals() and ser.is_open: ser.close()
+                    if 'ser' in locals() and hasattr(ser, 'is_open') and ser.is_open: ser.close()
+                    if 'sock' in locals(): sock.close()
                     
             else: print("Invalid input.")
 
