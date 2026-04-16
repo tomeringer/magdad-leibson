@@ -3,6 +3,20 @@
 #include "driver/rmt.h"
 
 // ========================================================
+//          BYTE → BINARY PRINT (For Debugging)
+// ========================================================
+#define BYTE_TO_BINARY_PATTERN "%c%c%c%c%c%c%c%c"
+#define BYTE_TO_BINARY(byte)  \
+  ((byte) & 0x80 ? '1' : '0'), \
+  ((byte) & 0x40 ? '1' : '0'), \
+  ((byte) & 0x20 ? '1' : '0'), \
+  ((byte) & 0x10 ? '1' : '0'), \
+  ((byte) & 0x08 ? '1' : '0'), \
+  ((byte) & 0x04 ? '1' : '0'), \
+  ((byte) & 0x02 ? '1' : '0'), \
+  ((byte) & 0x01 ? '1' : '0')
+
+// ========================================================
 //          RF TRANSMITTER SETUP
 // ========================================================
 #define TX_PIN 5 
@@ -17,7 +31,7 @@ ICM_20948_I2C imu;
 constexpr float ACC_MG_TO_G = 0.001f;
 constexpr float ALPHA_RP  = 0.98f;
 constexpr float ALPHA_YAW = 0.98f;
-constexpr float MAX_DT = 0.1f;
+constexpr float MAX_DT = 0.1f; // 100ms kill-switch for IMU drift
 
 constexpr float ROLL_TH  = 45.0f;
 constexpr float PITCH_TH = 30.0f;
@@ -40,7 +54,9 @@ Orientation ref{0,0,0};
 
 unsigned long lastTime = 0;
 unsigned long lastPrintTime = 0;
-constexpr unsigned long SEND_PERIOD_MS = 100;
+
+// === INCREASED SEND RATE TO MATCH NON-BLOCKING RF ===
+constexpr unsigned long SEND_PERIOD_MS = 33; // Fires ~30 times a second
 
 bool lastPacketWasZero = false;
 
@@ -80,7 +96,7 @@ bool gestureProcessed = false;
 uint8_t modeBit = 0; 
 
 // ========================================================
-//                      HELPERS
+//                       HELPERS
 // ========================================================
 float wrapAngle(float a) {
   while (a > 180.0f)  a -= 360.0f;
@@ -179,11 +195,8 @@ void transmitCompactData(uint8_t mergedByte, uint8_t flexLow) {
   
   items[idx++] = {{{ 0, 0, 0, 0 }}};
 
-  // שידור משולש לאמינות
-  for(int r = 0; r < 3; r++) {
-    rmt_write_items(RMT_CHANNEL_0, items, idx, true);
-    delay(12); 
-  }
+  // === FIXED: Single fire, NO DELAY, non-blocking ===
+  rmt_write_items(RMT_CHANNEL_0, items, idx, true);
 }
 
 // ========================================================
@@ -233,6 +246,8 @@ void loop() {
   unsigned long now = micros();
   float dt = (now - lastTime) * 1e-6f;
   lastTime = now;
+  
+  // IMU protection check
   if (dt <= 0.0f || dt > MAX_DT) dt = 0.01f;
 
   Vec3 acc, gyr, mag;
@@ -278,14 +293,19 @@ void loop() {
 
     bool isZeroPacket = ((mergedByte & 0x3F) == 0x00 && flexLow == 0x00);
 
+    // Output strictly for Serial Debugging
+    Serial.print("IMU: R="); Serial.print(relRoll, 1);
+    Serial.print(" P="); Serial.print(relPitch, 1);
+    Serial.print(" | Mode: "); Serial.print(modeBit);
+    Serial.print(" | Merged: "); Serial.printf(BYTE_TO_BINARY_PATTERN, BYTE_TO_BINARY(mergedByte));
+    Serial.print(" | Low: "); Serial.printf(BYTE_TO_BINARY_PATTERN, BYTE_TO_BINARY(flexLow));
+    Serial.println();
+
     // חסכון בסוללה כשהיד שטוחה, פרט לפעם הראשונה
     if (!(isZeroPacket && lastPacketWasZero)) {
       
-      // שידור אלחוטי קומפקטי
+      // שידור אלחוטי קומפקטי פעם אחת, מהיר וללא עיכובים
       transmitCompactData(mergedByte, flexLow);
-      
-      Serial.print("[TX] Merged: "); Serial.print(mergedByte);
-      Serial.print(" | Low: "); Serial.println(flexLow);
       
       lastPacketWasZero = isZeroPacket;
     }
