@@ -30,7 +30,7 @@ ax.grid(True, linestyle='--', alpha=0.6)
 ax.legend(loc='upper left')
 
 
-def update():
+def update(frame):
     try:
         # Pull any available packets from the buffer
         while True:
