@@ -5,7 +5,7 @@ from gpiozero import PWMOutputDevice
 from gpiozero.pins.rpigpio import RPiGPIOFactory
 
 # --- CONFIGURATION ---
-COMPUTER_IP = "192.168.1.XX"  # <--- Change to your PC's IP
+COMPUTER_IP = "10.135.205.20"  # <--- Change to your PC's IP
 UDP_PORT = 5005
 factory = RPiGPIOFactory()
 pi_enc = pigpio.pi()
