@@ -1,44 +1,39 @@
 #!/usr/bin/env python3
-import os, time, socket, math, sys, tty, termios, pigpio
+import os, time, math, sys, tty, termios, pigpio
+import serial
 import RPi.GPIO as GPIO
 from gpiozero.pins.pigpio import PiGPIOFactory
 
-# Import as namespaces to avoid NoneType copy errors
 import chassis
 import gripper
 import arm
 import vision
-import piano_player # Added piano_player for Hand mode
+import piano_player 
 
 os.environ['PIGPIO_ADDR'] = 'localhost'
 
-# Constants for Gripper mode
+# ========================================================
+# CONSTANTS & CONFIGURATION
+# ========================================================
+SERIAL_PORT = '/dev/ttyACM0'  
+BAUD_RATE = 115200
+
 ARC_STOP_OFFSET_CM, Z0_STOP_DISTANCE_CM = 4.5, 21.0
 ARC_MAX_OUTER_SPEED, ARC_SPEED_DIFF_FACTOR = 0.3, 1.06
-LEFT_CAM_PATH = "/dev/v4l/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.4:1.0-video-index0"
-RIGHT_CAM_PATH = "/dev/v4l/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.1:1.0-video-index0"
-CALIBRATION_FILE_PATH = "Autonomy/stereo_calibration.pkl"
 
-# Constants for Hand mode network
-UDP_IP = "0.0.0.0"
-UDP_PORT = 4210
-
-# Initial Setup (Shared)
 factory = PiGPIOFactory()
 pi_enc = pigpio.pi()
 GPIO.setmode(GPIO.BCM)
 
-# Shared Global Variables
 _arm_dir = 0
-_prev_f = [0, 0, 0, 0]
+_prev_f = [0, 0, 0, 0, 0]
 _drive_hist = ["STOP", "STOP"]
 _ignore_ultra = [False, None]
 last_rx = 0.0
 
 # ========================================================
-# GRIPPER MODE FUNCTIONS
+# GRIPPER MODE
 # ========================================================
-
 def get_average_distance():
     dist_l = abs(chassis.enc_left.output_revolutions()) * chassis.WHEEL_CIRCUMFERENCE_CM
     dist_r = abs(chassis.enc_right.output_revolutions()) * chassis.WHEEL_CIRCUMFERENCE_CM
@@ -51,7 +46,6 @@ def drive_arc(target_x, target_z):
     v_l, v_r = (ARC_MAX_OUTER_SPEED, s_in) if target_x > 0 else (s_in, ARC_MAX_OUTER_SPEED)
     total_arc = R * math.atan2(target_z, R - abs(target_x)) - ARC_STOP_OFFSET_CM
 
-    # Call through chassis namespace
     chassis.RIGHT_RPWM.value, chassis.LEFT_RPWM.value = v_r * ARC_SPEED_DIFF_FACTOR, v_l
     chassis.RIGHT_LPWM.value = chassis.LEFT_LPWM.value = 0.0
     chassis.enc_left.zero()
@@ -71,23 +65,15 @@ def bring_bottle_xz():
             return
         time.sleep(0.1)
 
-def handle_payload(merged_byte, flex_low):
+def handle_payload(b1, b2, b3, b4):
     global _drive_hist, _ignore_ultra, last_rx, _arm_dir, _prev_f
 
-    # --- 1. DECODE IMU DATA (From merged_byte) ---
-    rollBits = (merged_byte >> 2) & 0x03
-    pitchBits = merged_byte & 0x03
+    rollBits = (b2 >> 2) & 0x03
+    pitchBits = (b2 >> 4) & 0x03
 
-    # --- 2. DECODE FLEX DATA (From both bytes) ---
-    f4 = (merged_byte >> 4) & 0x03
-
-    f0 = flex_low & 0x03
-    f1 = (flex_low >> 2) & 0x03
-    f2 = (flex_low >> 4) & 0x03
-    f3 = (flex_low >> 6) & 0x03
-
-    f_2b = [f0, f1, f2, f3, f4]
-    f = [0 if (f == 0) or (f == 1) else 1 for f in f_2b]
+    flex_data = (b2 << 8) | b1
+    f_2b = [(flex_data >> (i * 2)) & 0x03 for i in range(5)]
+    f = [0 if (val <= 1) else 1 for val in f_2b] 
 
     if all(f) and not all(_prev_f):
         chassis.stop_drive()
@@ -100,16 +86,11 @@ def handle_payload(merged_byte, flex_low):
         if _arm_dir != 0:
             gripper.move_step(_arm_dir > 1)
 
-    # --- 3. DRIVE CHASSIS WITH ULTRASONIC SAFETY ---
     req = "STOP"
-    if pitchBits == 0b01:  # + Pitch
-        req = "FWD"
-    elif pitchBits == 0b10:  # - Pitch
-        req = "REV"
-    elif rollBits == 0b01:  # + Roll
-        req = "RIGHT"
-    elif rollBits == 0b10:  # - Roll
-        req = "LEFT"
+    if pitchBits == 0b01:     req = "FWD"
+    elif pitchBits == 0b10:   req = "REV"
+    elif rollBits == 0b01:    req = "RIGHT"
+    elif rollBits == 0b10:    req = "LEFT"
 
     too_close = chassis.obstacle_too_close()
 
@@ -122,99 +103,62 @@ def handle_payload(merged_byte, flex_low):
 
     ign = (_ignore_ultra[0] and req == _ignore_ultra[1])
 
-    if req == "REV":
-        chassis.drive_reverse()
-    elif req == "FWD":
-        chassis.drive_forward() if (not too_close or ign) else chassis.stop_drive()
-    elif req == "LEFT":
-        chassis.turn_left() if (not too_close or ign) else chassis.stop_drive()
-    elif req == "RIGHT":
-        chassis.turn_right() if (not too_close or ign) else chassis.stop_drive()
-    else:
-        chassis.stop_drive()
+    if req == "REV": chassis.drive_reverse()
+    elif req == "FWD": chassis.drive_forward() if (not too_close or ign) else chassis.stop_drive()
+    elif req == "LEFT": chassis.turn_left() if (not too_close or ign) else chassis.stop_drive()
+    elif req == "RIGHT": chassis.turn_right() if (not too_close or ign) else chassis.stop_drive()
+    else: chassis.stop_drive()
 
-    if req != _drive_hist[1]:
-        _drive_hist = [_drive_hist[1], req]
+    if req != _drive_hist[1]: _drive_hist = [_drive_hist[1], req]
 
     last_rx = time.time()
     _prev_f = f
 
-    # Debug print (can be commented out in production)
-    print(
-        f"\r[RX] RollBits: {rollBits:02b} | PitchBits: {pitchBits:02b} | Flex: {[f0, f1, f2, f3, f4]} | DriveCmd: {req} | TooClose: {too_close} | IgnoringUltra: {ign}      ",
-        end="")
-
+    print(f"[RX] R: {rollBits:02b} | P: {pitchBits:02b} | F: {f_2b} | Cmd: {req} | Close: {too_close} | Ign: {ign}")
 
 def run_ssh_control():
     def getch():
         fd = sys.stdin.fileno()
         old = termios.tcgetattr(fd)
-        try:
-            tty.setraw(fd); return sys.stdin.read(1)
-        finally:
-            termios.tcsetattr(fd, termios.TCSADRAIN, old)
+        try: tty.setraw(fd); return sys.stdin.read(1)
+        finally: termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
     print("WASD=Drive, R/F=Arm, O/C=Claw, Z=Auto, Q=Quit")
     while True:
         chassis.ultrasonic_tick()
         c = getch().lower()
-        if c == 'w':
-            chassis.drive_forward()
-        elif c == 's':
-            chassis.drive_reverse()
-        elif c == 'a':
-            chassis.turn_left()
-        elif c == 'd':
-            chassis.turn_right()
-        elif c == 'r':
-            arm.run(True)
-        elif c == 'f':
-            arm.run(False)
-        elif c == 'o':
-            gripper.move_step(0)
-        elif c == 'c':
-            gripper.move_step(1)
-        elif c == 'z':
-            bring_bottle_xz()
-        elif c == 'p':
-            print(vision.detect_bottle_once())
-        elif c == ' ' or c == 'k':
-            chassis.stop_drive(); arm.stop()
-        elif c == 'q':
-            break
+        if c == 'w': chassis.drive_forward()
+        elif c == 's': chassis.drive_reverse()
+        elif c == 'a': chassis.turn_left()
+        elif c == 'd': chassis.turn_right()
+        elif c == 'r': arm.run(True)
+        elif c == 'f': arm.run(False)
+        elif c == 'o': gripper.move_step(0)
+        elif c == 'c': gripper.move_step(1)
+        elif c == 'z': bring_bottle_xz()
+        elif c == 'p': print(vision.detect_bottle_once())
+        elif c == ' ' or c == 'k': chassis.stop_drive(); arm.stop()
+        elif c == 'q': break
 
 # ========================================================
-# HAND MODE FUNCTIONS
+# HAND MODE
 # ========================================================
-
-def handle_hand_payload(merged_byte, flex_low):
+def handle_hand_payload(b1, b2, b3, b4):
     global _drive_hist, _ignore_ultra, last_rx
     
-    # --- 1. DECODE IMU DATA (From merged_byte) ---
-    rollBits = (merged_byte >> 2) & 0x03
-    pitchBits = merged_byte & 0x03
+    rollBits = (b2 >> 2) & 0x03
+    pitchBits = (b2 >> 4) & 0x03
     
-    # --- 2. DECODE FLEX DATA (From both bytes) ---
-    f4 = (merged_byte >> 4) & 0x03
-    
-    f0 = flex_low & 0x03
-    f1 = (flex_low >> 2) & 0x03
-    f2 = (flex_low >> 4) & 0x03
-    f3 = (flex_low >> 6) & 0x03
+    flex_data = (b2 << 8) | b1
+    f_2b = [(flex_data >> (i * 2)) & 0x03 for i in range(5)]
 
-    # Pass all 5 fingers to the piano player
-    piano_player.set_states([f0, f1, f2, f3, f4])
+    piano_player.set_states(f_2b)
 
-    # --- 3. DRIVE CHASSIS WITH ULTRASONIC SAFETY ---
     req = "STOP"
-    if pitchBits == 0b01:     # + Pitch
-        req = "FWD"
-    elif pitchBits == 0b10:   # - Pitch
-        req = "REV"
-    elif rollBits == 0b01:    # + Roll
-        req = "RIGHT"
-    elif rollBits == 0b10:    # - Roll
-        req = "LEFT"
+    if pitchBits == 0b01:     req = "FWD"
+    elif pitchBits == 0b10:   req = "REV"
+    elif rollBits == 0b01:    req = "RIGHT"
+    elif rollBits == 0b10:    req = "LEFT"
         
     too_close = chassis.obstacle_too_close()
     
@@ -227,76 +171,54 @@ def handle_hand_payload(merged_byte, flex_low):
 
     ign = (_ignore_ultra[0] and req == _ignore_ultra[1])
     
-    if req == "REV":
-        chassis.drive_reverse()
-    elif req == "FWD":
-        chassis.drive_forward() if (not too_close or ign) else chassis.stop_drive()
-    elif req == "LEFT":
-        chassis.turn_left() if (not too_close or ign) else chassis.stop_drive()
-    elif req == "RIGHT":
-        chassis.turn_right() if (not too_close or ign) else chassis.stop_drive()
-    else:
-        chassis.stop_drive()
+    if req == "REV": chassis.drive_reverse()
+    elif req == "FWD": chassis.drive_forward() if (not too_close or ign) else chassis.stop_drive()
+    elif req == "LEFT": chassis.turn_left() if (not too_close or ign) else chassis.stop_drive()
+    elif req == "RIGHT": chassis.turn_right() if (not too_close or ign) else chassis.stop_drive()
+    else: chassis.stop_drive()
         
-    if req != _drive_hist[1]:
-        _drive_hist = [_drive_hist[1], req]
+    if req != _drive_hist[1]: _drive_hist = [_drive_hist[1], req]
         
     last_rx = time.time()
-
-    # Debug print (can be commented out in production)
-    print(f"\r[RX] RollBits: {rollBits:02b} | PitchBits: {pitchBits:02b} | Flex: {[f0, f1, f2, f3, f4]} | DriveCmd: {req} | TooClose: {too_close} | IgnoringUltra: {ign}      ", end="")
-
+    
+    print(f"[RX] R: {rollBits:02b} | P: {pitchBits:02b} | F: {f_2b} | Cmd: {req} | Close: {too_close} | Ign: {ign}")
 
 def run_hand_ssh_control():
     def getch():
         fd = sys.stdin.fileno()
         old = termios.tcgetattr(fd)
-        try:
-            tty.setraw(fd); return sys.stdin.read(1)
-        finally:
-            termios.tcsetattr(fd, termios.TCSADRAIN, old)
+        try: tty.setraw(fd); return sys.stdin.read(1)
+        finally: termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
-    print("WASD=Drive, 1-5=Cycle Fingers (0-3), Space/K=Stop, Q=Quit")
+    print("WASD=Drive, 1-5=Cycle Fingers, Space/K=Stop, Q=Quit")
     fingers = [0, 0, 0, 0, 0]
     
     while True:
         chassis.ultrasonic_tick()
         c = getch().lower()
-        
-        if c == 'w':
-            chassis.drive_forward()
-        elif c == 's':
-            chassis.drive_reverse()
-        elif c == 'a':
-            chassis.turn_left()
-        elif c == 'd':
-            chassis.turn_right()
+        if c == 'w': chassis.drive_forward()
+        elif c == 's': chassis.drive_reverse()
+        elif c == 'a': chassis.turn_left()
+        elif c == 'd': chassis.turn_right()
         elif c in ['1', '2', '3', '4', '5']:
             idx = int(c) - 1
-            # Cycle the specific finger state: 0 -> 1 -> 2 -> 3 -> 0
             fingers[idx] = (fingers[idx] + 1) % 4
             piano_player.set_states(fingers)
-            print(f"\rFingers state updated: {fingers}        ", end="")
-        elif c == ' ' or c == 'k':
-            chassis.stop_drive()
-        elif c == 'q':
-            break
+            print(f"Fingers state updated: {fingers}") 
+        elif c == ' ' or c == 'k': chassis.stop_drive()
+        elif c == 'q': break
 
 # ========================================================
-# MAIN EXECUTION
+# MAIN
 # ========================================================
 if __name__ == "__main__":
     try:
-        # Main loop to keep the program running and ask for mode repeatedly
         while True:
             mode = input("\nSelect mode: GRIPPER or HAND? (g/h/q to quit)\n").strip().lower()
-
-            if mode == 'q':
-                break # Exit the main loop and proceed to final shutdown
+            if mode == 'q': break
 
             elif mode == "g":
                 try:
-                    # Initialize components for gripper mode
                     chassis.init(factory, pi_enc)
                     gripper.init(factory)
                     arm.init(factory)
@@ -305,89 +227,94 @@ if __name__ == "__main__":
                     if input("Use Keyboard? (y/n)\n").lower() == "y":
                         run_ssh_control()
                     else:
-                        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                        sock.bind(("0.0.0.0", 4210))
-                        sock.settimeout(0.02)
+                        print(f"[SERIAL] Starting Serial Receiver on {SERIAL_PORT}...")
+                        ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=0.1)
+                        time.sleep(1)
+                        ser.reset_input_buffer()
+                        last_rx = time.time()
+                        
                         while True:
                             chassis.ultrasonic_tick()
-                            if _arm_dir != 0:
-                                arm.run(_arm_dir == 1)
-                            else:
-                                arm.stop()
-                            try:
-                                data, addr = sock.recvfrom(1024)
-                                if len(data) >= 2:
-                                    handle_payload(data[0], data[1])
-                            except socket.timeout:
-                                if time.time() - last_rx > 0.7: chassis.stop_drive()
-                except KeyboardInterrupt:
-                    print("\n[INFO] Returning to main menu...")
-                except Exception as e:
-                    print(f"[ERROR] An error occurred in GRIPPER mode: {e}")
+                            
+                            if _arm_dir != 0: arm.run(_arm_dir == 1)
+                            else: arm.stop()
+                                
+                            if ser.in_waiting > 0:
+                                line = ser.readline().decode('utf-8', errors='ignore').strip()
+                                if line:
+                                    if line.startswith("DATA:"):
+                                        try:
+                                            parts = line.split(":")[1].split(",")
+                                            if len(parts) == 4:
+                                                handle_payload(*[int(x) for x in parts])
+                                        except Exception: pass
+                                    else:
+                                        print(f"[ARDUINO MSG] {line}")
+                                        
+                            # Safety Timeout Mechanism - Zeroing all payload parameters if connection lost
+                            if time.time() - last_rx > 0.7: 
+                                chassis.stop_drive()
+                                print("[WARNING] Connection Lost. Forcing ZERO payload.")
+                                handle_payload(0, 0, 0, 0) # Sending zero data
+                                time.sleep(0.5) # Prevents spamming the console
+                            time.sleep(0.01)
+                            
+                except KeyboardInterrupt: print("\n[INFO] Returning to main menu...")
+                except Exception as e: print(f"[ERROR] GRIPPER mode: {e}")
                 finally:
-                    # Cleanup specific to gripper mode before looping back
-                    chassis.stop_drive()
-                    chassis.close_pins()
-                    gripper.close_pins()
-                    arm.close_pins()
-                    vision.shutdown()
-                    try: sock.close()
-                    except Exception: pass
+                    chassis.stop_drive(); chassis.close_pins(); gripper.close_pins()
+                    arm.close_pins(); vision.shutdown()
+                    if 'ser' in locals() and ser.is_open: ser.close()
                         
             elif mode == "h":
                 try:
-                    # Initialize components for hand mode
                     chassis.init(factory, pi_enc)
                     piano_player.init(factory)
 
                     if input("Use Keyboard? (y/n)\n").lower() == "y":
                         run_hand_ssh_control()
                     else: 
-                        print(f"[NETWORK] Starting UDP Server on {UDP_IP}:{UDP_PORT}...")
-                        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                        sock.bind((UDP_IP, UDP_PORT))
-                        sock.settimeout(0.02)
-                        
-                        print("[NETWORK] UDP Server initialized successfully.")
+                        print(f"[SERIAL] Starting Serial Receiver on {SERIAL_PORT}...")
+                        ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=0.1)
+                        time.sleep(1)
+                        ser.reset_input_buffer()
                         last_rx = time.time()
-                        print("[SYSTEM] Robot Ready. Waiting for raw 2-byte glove commands...")
                         
                         while True:
                             chassis.ultrasonic_tick()
-                            try:
-                                data, addr = sock.recvfrom(1024)                    
-                                if len(data) >= 2:
-                                    handle_hand_payload(data[0], data[1])  
-                            except socket.timeout:
-                                # If no packet arrives for 0.7 seconds, halt the robot
-                                if time.time() - last_rx > 0.7: 
-                                    chassis.stop_drive()                    
-                except KeyboardInterrupt:
-                    print("\n[INFO] Returning to main menu...")
-                except Exception as e:
-                    print(f"[ERROR] An error occurred in HAND mode: {e}")
-                finally:
-                    # Cleanup specific to hand mode before looping back
-                    chassis.stop_drive()
-                    chassis.close_pins()
-                    piano_player.close_pins()
-                    arm.close_pins()
-                    try: sock.close()
-                    except Exception: pass
-                    
-            else:
-                print("Invalid input. Please select 'g', 'h', or 'q'.")
+                            
+                            if ser.in_waiting > 0:
+                                line = ser.readline().decode('utf-8', errors='ignore').strip()
+                                if line:
+                                    if line.startswith("DATA:"):
+                                        try:
+                                            parts = line.split(":")[1].split(",")
+                                            if len(parts) == 4:
+                                                handle_hand_payload(*[int(x) for x in parts])
+                                        except Exception: pass
+                                    else:
+                                        print(f"[ARDUINO MSG] {line}")
+                                        
+                            # Safety Timeout Mechanism - Zeroing all payload parameters if connection lost
+                            if time.time() - last_rx > 0.7: 
+                                chassis.stop_drive()
+                                print("[WARNING] Connection Lost. Forcing ZERO payload.")
+                                handle_hand_payload(0, 0, 0, 0) # Sending zero data
+                                time.sleep(0.5) # Prevents spamming the console
+                            time.sleep(0.01)
 
-    except KeyboardInterrupt:
-        print("\n[INFO] Interrupted by user. Shutting down completely...")
-        
+                except KeyboardInterrupt: print("\n[INFO] Returning to main menu...")
+                except Exception as e: print(f"[ERROR] HAND mode: {e}")
+                finally:
+                    chassis.stop_drive(); chassis.close_pins(); piano_player.close_pins()
+                    if 'ser' in locals() and ser.is_open: ser.close()
+                    
+            else: print("Invalid input.")
+
+    except KeyboardInterrupt: print("\n[INFO] Interrupted by user.")
     finally:
-        # Final safe shutdown for the entire system
         chassis.stop_drive()
-        try:
-            vision.shutdown()
-        except Exception:
-            pass # In case vision wasn't initialized 
-            
+        try: vision.shutdown()
+        except Exception: pass 
         GPIO.cleanup()
         print("[SYSTEM] Safely powered down.")

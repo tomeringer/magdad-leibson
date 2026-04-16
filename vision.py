@@ -11,7 +11,7 @@ from ultralytics import YOLO
 # ============================================================
 CAM_WIDTH = 640
 CAM_HEIGHT = 480
-CAM_FPS = 5
+CAM_FPS = 15
 DEFAULT_IMG_SIZE = (CAM_WIDTH, CAM_HEIGHT)
 
 BOTTLE_CLASS_ID = 39
@@ -22,8 +22,8 @@ CAMERA_YAW_OFFSET_RAD = math.radians(3)
 CAMERA_X_OFFSET_CM = 5.0
 
 # These paths usually come from main.py, defined here for safety
-LEFT_CAM_PATH = "/dev/v4l/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.4:1.0-video-index0"
-RIGHT_CAM_PATH = "/dev/v4l/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.1:1.0-video-index0"
+LEFT_CAM_PATH = "/dev/video_sonix2"
+RIGHT_CAM_PATH = "/dev/video_sonix1"
 CALIBRATION_FILE_PATH = "Autonomy/stereo_calibration.pkl"
 
 # ============================================================
@@ -37,27 +37,91 @@ _maps_l = None
 _maps_r = None
 _Q = None
 
+def wait_for_symlink(symlink_path, timeout=15):
+    """Block until the symlink exists and resolves to a real device."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if os.path.exists(symlink_path) and os.path.exists(os.path.realpath(symlink_path)):
+            return True
+        print(f"[CAM] Waiting for {symlink_path}...")
+        time.sleep(0.5)
+    return False
 
-def open_cam(path: str, name: str) -> cv2.VideoCapture:
-    cap = cv2.VideoCapture(path, cv2.CAP_V4L2)
+def path_to_index(symlink_path):
+    """Resolve symlink and extract the numeric index OpenCV wants."""
+    real_path = os.path.realpath(symlink_path)  # e.g. /dev/video4
+    if not real_path.startswith("/dev/video"):
+        raise RuntimeError(f"Unexpected device path: {real_path}")
+    return int(real_path.replace("/dev/video", ""))  # e.g. 4
+
+def open_cam1(path: str, name: str) -> cv2.VideoCapture:
+    if not wait_for_symlink(path, timeout=15):
+        raise RuntimeError(f"Symlink never appeared: {path}")
+
+    cap = None
+    for _ in range(10):
+        index = path_to_index(path)
+        cap = cv2.VideoCapture(index, cv2.CAP_V4L2)
+        if cap.isOpened():
+            print(f"[CAM] Opened {path} -> {index}")
+            break
+        time.sleep(1)
+
     print(f"[CAM] {name}: opening {path} isOpened={cap.isOpened()}", flush=True)
     if not cap.isOpened():
         return cap
 
-    cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+    cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter.fourcc('M', 'J', 'P', 'G'))
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, CAM_WIDTH)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAM_HEIGHT)
     cap.set(cv2.CAP_PROP_FPS, CAM_FPS)
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
-    for _ in range(10):
-        cap.read()
+    # for _ in range(10):
+    #     cap.read()
 
     print(f"[CAM] {name}: negotiated "
           f"{cap.get(cv2.CAP_PROP_FRAME_WIDTH):.0f}x{cap.get(cv2.CAP_PROP_FRAME_HEIGHT):.0f} "
           f"@ {cap.get(cv2.CAP_PROP_FPS):.1f}fps", flush=True)
     return cap
 
+def open_cam(path: str, name: str) -> cv2.VideoCapture:
+    # Block until the symlink exists
+    if not wait_for_symlink(path, timeout=15):
+        raise RuntimeError(f"Symlink never appeared: {path}")
+
+    cap = None
+    for _ in range(10):
+        index = path_to_index(path)
+        cap = cv2.VideoCapture(index, cv2.CAP_V4L2)
+        if cap.isOpened():
+            print(f"[CAM] Opened {path} -> {index}")
+            break
+        time.sleep(1)
+
+    if not cap.isOpened():
+        print(f"[CAM] {name}: opening {path} failed.", flush=True)
+        return cap
+
+    # Force MJPG compression using the standard explicit syntax
+    cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, CAM_WIDTH)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAM_HEIGHT)
+    cap.set(cv2.CAP_PROP_FPS, CAM_FPS)
+    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
+    # Verify which format the camera actually accepted
+    actual_fourcc = int(cap.get(cv2.CAP_PROP_FOURCC))
+    decoded_fourcc = "".join([chr((actual_fourcc >> 8 * i) & 0xFF) for i in range(4)])
+
+    print(f"[CAM] {name}: negotiated "
+          f"{cap.get(cv2.CAP_PROP_FRAME_WIDTH):.0f}x{cap.get(cv2.CAP_PROP_FRAME_HEIGHT):.0f} "
+          f"@ {cap.get(cv2.CAP_PROP_FPS):.1f}fps | Codec: {decoded_fourcc}", flush=True)
+          
+    if decoded_fourcc != "MJPG":
+        print(f"[WARNING] {name} camera ignored MJPG request and fell back to {decoded_fourcc}!")
+
+    return cap
 
 def load_and_prepare_calibration(file_path: str):
     try:
@@ -115,6 +179,7 @@ def init() -> None:
     _model = YOLO('Autonomy/yolov8n_ncnn_model', task='detect')
 
     _cap_l = open_cam(LEFT_CAM_PATH, "LEFT")
+    time.sleep(2)
     _cap_r = open_cam(RIGHT_CAM_PATH, "RIGHT")
     if not _cap_l.isOpened() or not _cap_r.isOpened():
         raise RuntimeError("One or both cameras failed to open.")
