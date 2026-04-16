@@ -11,7 +11,7 @@ from ultralytics import YOLO
 # ============================================================
 CAM_WIDTH = 640
 CAM_HEIGHT = 480
-CAM_FPS = 5
+CAM_FPS = 15
 DEFAULT_IMG_SIZE = (CAM_WIDTH, CAM_HEIGHT)
 
 BOTTLE_CLASS_ID = 39
@@ -54,7 +54,7 @@ def path_to_index(symlink_path):
         raise RuntimeError(f"Unexpected device path: {real_path}")
     return int(real_path.replace("/dev/video", ""))  # e.g. 4
 
-def open_cam(path: str, name: str) -> cv2.VideoCapture:
+def open_cam1(path: str, name: str) -> cv2.VideoCapture:
     if not wait_for_symlink(path, timeout=15):
         raise RuntimeError(f"Symlink never appeared: {path}")
 
@@ -85,6 +85,43 @@ def open_cam(path: str, name: str) -> cv2.VideoCapture:
           f"@ {cap.get(cv2.CAP_PROP_FPS):.1f}fps", flush=True)
     return cap
 
+def open_cam(path: str, name: str) -> cv2.VideoCapture:
+    # Block until the symlink exists
+    if not wait_for_symlink(path, timeout=15):
+        raise RuntimeError(f"Symlink never appeared: {path}")
+
+    cap = None
+    for _ in range(10):
+        index = path_to_index(path)
+        cap = cv2.VideoCapture(index, cv2.CAP_V4L2)
+        if cap.isOpened():
+            print(f"[CAM] Opened {path} -> {index}")
+            break
+        time.sleep(1)
+
+    if not cap.isOpened():
+        print(f"[CAM] {name}: opening {path} failed.", flush=True)
+        return cap
+
+    # Force MJPG compression using the standard explicit syntax
+    cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, CAM_WIDTH)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAM_HEIGHT)
+    cap.set(cv2.CAP_PROP_FPS, CAM_FPS)
+    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
+    # Verify which format the camera actually accepted
+    actual_fourcc = int(cap.get(cv2.CAP_PROP_FOURCC))
+    decoded_fourcc = "".join([chr((actual_fourcc >> 8 * i) & 0xFF) for i in range(4)])
+
+    print(f"[CAM] {name}: negotiated "
+          f"{cap.get(cv2.CAP_PROP_FRAME_WIDTH):.0f}x{cap.get(cv2.CAP_PROP_FRAME_HEIGHT):.0f} "
+          f"@ {cap.get(cv2.CAP_PROP_FPS):.1f}fps | Codec: {decoded_fourcc}", flush=True)
+          
+    if decoded_fourcc != "MJPG":
+        print(f"[WARNING] {name} camera ignored MJPG request and fell back to {decoded_fourcc}!")
+
+    return cap
 
 def load_and_prepare_calibration(file_path: str):
     try:
