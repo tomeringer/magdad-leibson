@@ -78,7 +78,7 @@ try:
 
     while True:
         # 1. Read Encoders
-        l_revs = enc_left.output_revolutions()
+        l_revs = -enc_left.output_revolutions()
         r_revs = enc_right.output_revolutions()
 
         # 2. Send via UDP
