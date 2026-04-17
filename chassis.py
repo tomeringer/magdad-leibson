@@ -47,6 +47,9 @@ class YellowJacketEncoder:
 
     def zero(self): self.counts = 0
 
+    def cancel(self):
+        self.pi.cancel()
+
 
 def init(factory, pi_enc):
     global RIGHT_RPWM, LEFT_RPWM, RIGHT_LPWM, LEFT_LPWM, enc_left, enc_right
@@ -118,3 +121,5 @@ def close_pins():
     LEFT_RPWM.close()
     RIGHT_LPWM.close()
     LEFT_LPWM.close()
+    enc_left.cancel()
+    enc_right.cancel()
