@@ -164,8 +164,6 @@ def handle_payload(merged_byte, flex_low, b3=0, b4=0):
         if f[4] and not _prev_f[4]: gripper.move_step(1)
         if f[0] and not _prev_f[0]: gripper.move_step(0)
         _arm_dir = -1 if (f[2] and not f[1]) else 1 if (f[1] and not f[2]) else 0
-        if _arm_dir != 0:
-            gripper.move_step(_arm_dir > 1)
 
         # Drive Logic: Pitch/Roll
     req = "STOP"
