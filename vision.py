@@ -149,9 +149,9 @@ def init() -> None:
 
 
 def read_latest_stereo(cap_l: cv2.VideoCapture, cap_r: cv2.VideoCapture, flush_n: int = 10) -> tuple:
-    # for _ in range(flush_n):
-    #     cap_l.grab()
-    #     cap_r.grab()
+    for _ in range(flush_n):
+        cap_l.grab()
+        cap_r.grab()
     ret_l, frame_l = cap_l.retrieve()
     time.sleep(0.1)
     ret_r, frame_r = cap_r.retrieve()
