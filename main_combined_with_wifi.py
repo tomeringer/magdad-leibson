@@ -258,7 +258,8 @@ def handle_hand_payload(merged_byte, flex_low, *args):
         
     else:
         # --- MODE 0: DRIVE & ARM CONTROL ---
-        
+        piano_player.set_states([0, 0, 0, 0, 0])
+
         # Arm Logic: F1 up, F2 down, using the solid BINARY states
         if _binary_f[1] == 1:
             _arm_dir = 1
