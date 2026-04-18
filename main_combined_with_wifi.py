@@ -377,7 +377,7 @@ def handle_hand_payload(merged_byte, flex_low, *args):
     last_rx = time.time()
 
     print(
-        f"[RX] MODE: {modeBit} | R: {rollBits:02b} P: {pitchBits:02b} | F(Raw): {f_2b} | Cmd: {req} | Arm: {_arm_dir}")
+        f"[RX] MODE: {modeBit} | R: {rollBits:02b} P: {pitchBits:02b} | F(Raw): {f_2b} | Cmd: {req} | Close: {too_close} | Arm: {_arm_dir}")
 
 
 def run_hand_ssh_control():
