@@ -26,6 +26,14 @@ UDP_PORT = 4210
 ARC_STOP_OFFSET_CM, Z0_STOP_DISTANCE_CM = 4.5, 21.0
 ARC_MAX_OUTER_SPEED, ARC_SPEED_DIFF_FACTOR = 0.3, 1.0
 
+# --- LED GPIO PINS (BCM Mapping from Physical Pins) ---
+# Physical Pin 32 = GPIO 12  (Red)
+# Physical Pin 12 = GPIO 18 (Green)
+# Physical Pin 16 = GPIO 23 (Blue)
+LED_R_PIN = 8
+LED_G_PIN = 18
+LED_B_PIN = 23
+
 factory = PiGPIOFactory()
 pi_enc = pigpio.pi()
 GPIO.setmode(GPIO.BCM)
@@ -37,6 +45,27 @@ _drive_hist = ["STOP", "STOP"]
 _ignore_ultra = [False, None]
 last_rx = 0.0
 
+# ========================================================
+# LED STATUS SYSTEM
+# ========================================================
+def init_leds():
+    """Initializes the LED PWM using the existing pigpio instance."""
+    try:
+        pi_enc.set_PWM_range(LED_R_PIN, 255)
+        pi_enc.set_PWM_range(LED_G_PIN, 255)
+        pi_enc.set_PWM_range(LED_B_PIN, 255)
+        set_led_color(0, 0, 0) # Ensure they start OFF
+    except Exception as e:
+        print(f"[LED ERROR] Failed to initialize LEDs: {e}")
+
+def set_led_color(r, g, b):
+    """Sets the RGB LED strip color (0-255 per channel)."""
+    try:
+        pi_enc.set_PWM_dutycycle(LED_R_PIN, r)
+        pi_enc.set_PWM_dutycycle(LED_G_PIN, g)
+        pi_enc.set_PWM_dutycycle(LED_B_PIN, b)
+    except:
+        pass
 
 # ========================================================
 # GRIPPER MODE
@@ -131,13 +160,18 @@ def bring_bottle_xz():
     gripper.move_step(0)
     t0 = time.perf_counter()
     while time.perf_counter() - t0 < 5.0:
+        set_led_color(255, 128, 0) # ORANGE: Searching for bottle
         res = vision.detect_bottle_once()
         if res["found"]:
+            set_led_color(0, 255, 0) # GREEN: Bottle found!
             drive_arc(res['X'], res['Z'])
             time.sleep(0.3)
             gripper.move_step(1)
+            set_led_color(0, 0, 0) # OFF: Finished task
             return
         time.sleep(0.1)
+    
+    set_led_color(0, 0, 0) # OFF: Timeout
 
 
 def handle_payload(merged_byte, flex_low, b3=0, b4=0):
@@ -203,6 +237,12 @@ def handle_payload(merged_byte, flex_low, b3=0, b4=0):
         chassis.stop_drive()
 
     if req != _drive_hist[1]: _drive_hist = [_drive_hist[1], req]
+
+    # LED Logic for active connection
+    if too_close:
+        set_led_color(0, 0, 255) # BLUE: Ultrasonic Obstacle
+    else:
+        set_led_color(0, 0, 0)   # OFF: Normal driving
 
     last_rx = time.time()
     _prev_f = f
@@ -328,6 +368,12 @@ def handle_hand_payload(merged_byte, flex_low, *args):
 
         if req != _drive_hist[1]: _drive_hist = [_drive_hist[1], req]
 
+    # LED Logic for active connection
+    if too_close:
+        set_led_color(0, 0, 255) # BLUE: Ultrasonic Obstacle
+    else:
+        set_led_color(0, 0, 0)   # OFF: Normal driving
+
     last_rx = time.time()
 
     print(
@@ -373,6 +419,8 @@ def run_hand_ssh_control():
 # ========================================================
 if __name__ == "__main__":
     try:
+        init_leds() # Initialize LED states on boot
+        
         while True:
             mode = input("\nSelect mode: GRIPPER or HAND? (g/h/q to quit)\n").strip().lower()
             if mode == 'q':
@@ -427,6 +475,7 @@ if __name__ == "__main__":
                                 chassis.stop_drive()
                                 print("[WARNING] Connection Lost. Forcing ZERO payload.")
                                 handle_payload(0, 0)
+                                set_led_color(255, 0, 0) # RED: Connection lost
                                 time.sleep(0.5)
 
                     else:
@@ -460,6 +509,7 @@ if __name__ == "__main__":
                                 chassis.stop_drive()
                                 print("[WARNING] Connection Lost. Forcing ZERO payload.")
                                 handle_payload(0, 0)
+                                set_led_color(255, 0, 0) # RED: Connection lost
                                 time.sleep(0.5)
                             time.sleep(0.01)
 
@@ -527,6 +577,7 @@ if __name__ == "__main__":
                                 piano_player.set_states([0, 0, 0, 0, 0])
                                 print("[WARNING] Connection Lost. Forcing ZERO payload.")
                                 handle_hand_payload(0, 0)
+                                set_led_color(255, 0, 0) # RED: Connection lost
                                 time.sleep(0.5)
 
                     else:
@@ -563,6 +614,7 @@ if __name__ == "__main__":
                                 piano_player.set_states([0, 0, 0, 0, 0])
                                 print("[WARNING] Connection Lost. Forcing ZERO payload.")
                                 handle_hand_payload(0, 0)
+                                set_led_color(255, 0, 0) # RED: Connection lost
                                 time.sleep(0.5)
                             time.sleep(0.01)
 
@@ -589,5 +641,6 @@ if __name__ == "__main__":
             vision.shutdown()
         except Exception:
             pass
+        set_led_color(0, 0, 0) # Ensure LEDs turn off on exit
         GPIO.cleanup()
         print("[SYSTEM] Safely powered down.")
