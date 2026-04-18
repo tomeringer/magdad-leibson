@@ -30,9 +30,9 @@ ARC_MAX_OUTER_SPEED, ARC_SPEED_DIFF_FACTOR = 0.3, 1.0
 # Physical Pin 32 = GPIO 12  (Red)
 # Physical Pin 12 = GPIO 18 (Green)
 # Physical Pin 16 = GPIO 23 (Blue)
-LED_R_PIN = 12
-LED_G_PIN = 23
-LED_B_PIN = 18
+LED_R_PIN = 8
+LED_G_PIN = 18
+LED_B_PIN = 23
 
 factory = PiGPIOFactory()
 pi_enc = pigpio.pi()
