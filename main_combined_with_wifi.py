@@ -51,9 +51,16 @@ last_rx = 0.0
 def init_leds():
     """Initializes the LED PWM using the existing pigpio instance."""
     try:
+        # 1. Turn on the Pi's INTERNAL Pull-Down Resistors
+        pi_enc.set_pull_up_down(LED_R_PIN, pigpio.PUD_DOWN)
+        pi_enc.set_pull_up_down(LED_G_PIN, pigpio.PUD_DOWN)
+        pi_enc.set_pull_up_down(LED_B_PIN, pigpio.PUD_DOWN)
+
+        # 2. Setup the PWM ranges
         pi_enc.set_PWM_range(LED_R_PIN, 255)
         pi_enc.set_PWM_range(LED_G_PIN, 255)
         pi_enc.set_PWM_range(LED_B_PIN, 255)
+        
         set_led_color(0, 0, 0) # Ensure they start OFF
     except Exception as e:
         print(f"[LED ERROR] Failed to initialize LEDs: {e}")
