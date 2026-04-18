@@ -146,7 +146,7 @@ def analyze_and_generate_code():
     print(hysteresis_cpp)
     print("\n========================================================")
     
-    plt.tight_layout()
+    plt.tight_layout(pad=3.0)
     plt.show()
 
 if __name__ == '__main__':
