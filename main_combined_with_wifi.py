@@ -206,9 +206,7 @@ def handle_payload(merged_byte, flex_low, b3=0, b4=0):
         arm.stop()
         bring_bottle_xz()
     else:
-        if f[4] and not _prev_f[4]:
-            gripper.move_step(1)
-            print("blah")
+        if f[4] and not _prev_f[4]: gripper.move_step(1)
         if f[0] and not _prev_f[0]: gripper.move_step(0)
         _arm_dir = -1 if (f[2] and not f[1]) else 1 if (f[1] and not f[2]) else 0
 
