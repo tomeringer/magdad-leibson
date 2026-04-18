@@ -37,18 +37,36 @@ def get_average_distance():
 
 
 def drive_arc(target_x, target_z):
-    R = (target_x ** 2 + target_z ** 2) / (2 * abs(target_x))
+    # L is the physical distance from the wheel axis to the gripper
+    L = Z0_STOP_DISTANCE_CM
+
+    # Transform camera-relative coordinates to wheel-axis coordinates
+    X_b = target_x
+    Z_b = target_z + L
+
+    # Calculate signed center of rotation and true wheel radius
+    x_c = (X_b ** 2 + Z_b ** 2 - L ** 2) / (2 * X_b)
+    R = abs(x_c)
+
     r_in, r_out = R - (chassis.TRACK_WIDTH_CM / 2), R + (chassis.TRACK_WIDTH_CM / 2)
     s_in = ARC_MAX_OUTER_SPEED * (r_in / r_out)
     v_l, v_r = (ARC_MAX_OUTER_SPEED, s_in) if target_x > 0 else (s_in, ARC_MAX_OUTER_SPEED)
-    total_arc = R * math.atan2(target_z, R - abs(target_x)) - ARC_STOP_OFFSET_CM
 
-    # Call through chassis namespace
+    # Calculate the total angle of the turn using vectors from the center of rotation
+    phi_start = math.atan2(L, -x_c)
+    phi_end = math.atan2(Z_b, X_b - x_c)
+    theta = abs(phi_end - phi_start)
+
+    total_arc = (R * theta) - ARC_STOP_OFFSET_CM
+
     chassis.RIGHT_RPWM.value, chassis.LEFT_RPWM.value = v_r * ARC_SPEED_DIFF_FACTOR, v_l
     chassis.RIGHT_LPWM.value = chassis.LEFT_LPWM.value = 0.0
     chassis.enc_left.zero()
     chassis.enc_right.zero()
-    while get_average_distance() < total_arc: time.sleep(0.01)
+
+    while get_average_distance() < total_arc:
+        time.sleep(0.01)
+
     chassis.stop_drive()
 
 
